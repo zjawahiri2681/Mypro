@@ -21,6 +21,11 @@ Google Drive > Second Brain > AGENTS.md. Read that first when Drive is connected
 - Jafurah Type-D Additional 40 Rooms - due 2026-12-06
 - Archived: Hyundai OWEP (2026-10-30)
 
+## Apps in this repo
+- `android/IPTVBox/` - Android IPTV player (M3U / Xtream / Stalker, EPG, watch-together). APK is built by
+  `.github/workflows/android-build.yml` and published as a GitHub Release on every push to that folder.
+  Core parsers/protocol are pure JVM: `IPTVBOX_CORE_ONLY=1 ./gradlew :core:test` runs without the Android SDK.
+
 ## Desktop folders
 Filled in once this repo is shared through Remote Control. One line per folder:
 path - what it holds - which project - matching Drive folder.
