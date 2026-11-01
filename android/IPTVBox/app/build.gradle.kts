@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val appVersionName = "1.0.0"
+val appVersionName = "1.2.0"
 val appVersionCode = (System.getenv("IPTVBOX_VERSION_CODE") ?: "1").toInt()
 
 // Release signing: provide a keystore through environment variables (CI) or a
@@ -100,6 +100,8 @@ dependencies {
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
+    // FFmpeg audio decoders (AC3, E-AC3, DTS, MP2...) for sports/broadcast channels phones can't decode natively
+    implementation(libs.media3.ffmpeg.decoder)
 
     implementation(libs.coil.compose)
     implementation(libs.okhttp)

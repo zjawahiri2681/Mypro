@@ -56,8 +56,9 @@ object XmltvParser {
                         stop = parseTime(attributes.getValue("stop"))
                         title.setLength(0); desc.setLength(0); category.setLength(0)
                     }
-                    "title" -> if (inProgramme) current = title
-                    "desc" -> if (inProgramme) current = desc
+                    // Guides often repeat <title>/<desc> per language: keep the first of each.
+                    "title" -> if (inProgramme && title.isEmpty()) current = title
+                    "desc" -> if (inProgramme && desc.isEmpty()) current = desc
                     "category" -> if (inProgramme && category.isEmpty()) current = category
                     "channel" -> { inChannel = true; currentChannelId = attributes.getValue("id") ?: "" }
                     "display-name" -> if (inChannel) { inDisplayName = true; text.setLength(0) }
@@ -114,13 +115,16 @@ object XmltvParser {
         override fun initialValue() = SimpleDateFormat("yyyyMMddHHmmss", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
     }
 
+    private val timeRegex = Regex("""^(\d{8,14})\s*([+-]\d{4})?.*$""")
+
     /** Parses "20240131203000 +0100" (also tolerates missing seconds/offset). */
     fun parseTime(raw: String?): Long {
         if (raw.isNullOrBlank()) return 0L
         val s = raw.trim()
-        val space = s.indexOf(' ')
-        var datePart = if (space > 0) s.substring(0, space) else s
-        val offsetPart = if (space > 0) s.substring(space + 1).trim() else ""
+        // "20240131200000 +0100", "20240131200000+0100" or "20240131200000"
+        val m = timeRegex.find(s)
+        var datePart = m?.groupValues?.get(1) ?: s.substringBefore(' ')
+        val offsetPart = m?.groupValues?.get(2) ?: ""
         if (datePart.length < 14) datePart = datePart.padEnd(14, '0')
         if (datePart.length > 14) datePart = datePart.substring(0, 14)
         val base = try { tlFormat.get()!!.parse(datePart)?.time ?: return 0L } catch (e: Exception) { return 0L }

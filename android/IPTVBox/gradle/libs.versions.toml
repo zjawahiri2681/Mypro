@@ -14,6 +14,7 @@ navigation = "2.9.0"
 lifecycle = "2.9.1"
 media3 = "1.7.1"
 coil = "2.7.0"
+ffmpegDecoder = "1.6.1+2"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -45,6 +46,7 @@ media3-datasource-okhttp = { module = "androidx.media3:media3-datasource-okhttp"
 media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
 coil-compose = { module = "io.coil-kt:coil-compose", version.ref = "coil" }
+media3-ffmpeg-decoder = { module = "org.jellyfin.media3:media3-ffmpeg-decoder", version.ref = "ffmpegDecoder" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

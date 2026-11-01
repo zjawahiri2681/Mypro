@@ -32,6 +32,12 @@ import com.mypro.iptvbox.player.PlayerActivity
 import com.mypro.iptvbox.ui.EmptyState
 import com.mypro.iptvbox.ui.FocusCard
 import com.mypro.iptvbox.ui.FocusableRow
+import com.mypro.iptvbox.ui.LocalIsTv
+import com.mypro.iptvbox.ui.SearchField
+import com.mypro.iptvbox.ui.tvFocus
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.lazy.itemsIndexed
 
 @Composable
 private fun GroupChips(groups: List<String>, selected: String, onSelect: (String) -> Unit) {
@@ -46,21 +52,17 @@ private fun GroupChips(groups: List<String>, selected: String, onSelect: (String
 
 @Composable
 private fun SearchBox(query: String, onChange: (String) -> Unit, hint: String) {
-    OutlinedTextField(
-        value = query, onValueChange = onChange, singleLine = true, placeholder = { Text(hint) },
-        leadingIcon = { Icon(Icons.Default.Search, null) },
-        trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { onChange("") }) { Icon(Icons.Default.Close, "Clear") } },
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-    )
+    SearchField(query, onChange, hint, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
 }
 
 @Composable
 private fun Poster(url: String, modifier: Modifier = Modifier) {
+    val shape = MaterialTheme.shapes.small
     if (url.isNotBlank()) {
-        AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.06f)))
+        AsyncImage(model = url, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceVariant))
     } else {
-        Box(modifier.clip(RoundedCornerShape(8.dp)).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
-            Icon(Icons.Default.Movie, null, tint = Color.White.copy(alpha = 0.4f), modifier = Modifier.size(40.dp))
+        Box(modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Movie, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(40.dp))
         }
     }
 }
@@ -81,14 +83,14 @@ fun MoviesScreen() {
     Column(Modifier.fillMaxSize()) {
         SearchBox(query, { query = it }, "Search ${movies.size} movies")
         GroupChips(groups, group) { group = it }
-        LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyVerticalGrid(columns = GridCells.Adaptive(if (LocalIsTv.current) 170.dp else 140.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(shown, key = { it.id }) { m ->
                 FocusCard(onClick = { PlayerActivity.playUrl(context, m.url, m.name) }) {
                     Poster(m.poster, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
                     Spacer(Modifier.height(6.dp))
-                    Text(m.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                    Text(m.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
                     val meta = listOf(m.year, m.rating.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }).filterNotNull().filter { it.isNotBlank() }.joinToString("  ")
-                    if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -100,6 +102,8 @@ fun SeriesScreen() {
     val content by IptvApp.repo.content.collectAsState()
     val series = content?.series ?: emptyList()
     var selected by remember { mutableStateOf<SeriesItem?>(null) }
+    var lastOpenedId by rememberSaveable { mutableStateOf<String?>(null) }
+    val returnFocus = remember { FocusRequester() }
     var query by rememberSaveable { mutableStateOf("") }
     var group by rememberSaveable { mutableStateOf("All") }
     val groups = remember(series) { listOf("All") + series.map { it.group.ifBlank { "Other" } }.distinct() }
@@ -111,17 +115,19 @@ fun SeriesScreen() {
         SeriesDetail(s) { selected = null }
         return
     }
+    // Coming back from a series: put the remote focus back on the poster we left from.
+    LaunchedEffect(lastOpenedId) { if (lastOpenedId != null) runCatching { returnFocus.requestFocus() } }
     if (series.isEmpty()) { EmptyState("No series in this playlist.\nSeries with seasons and episodes come from Xtream Codes logins."); return }
     Column(Modifier.fillMaxSize()) {
         SearchBox(query, { query = it }, "Search ${series.size} series")
         GroupChips(groups, group) { group = it }
-        LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyVerticalGrid(columns = GridCells.Adaptive(if (LocalIsTv.current) 170.dp else 140.dp), contentPadding = PaddingValues(12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(shown, key = { it.id }) { s ->
-                FocusCard(onClick = { selected = s }) {
+                FocusCard(onClick = { lastOpenedId = s.id; selected = s }, modifier = if (s.id == lastOpenedId) Modifier.focusRequester(returnFocus) else Modifier) {
                     Poster(s.poster, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
                     Spacer(Modifier.height(6.dp))
-                    Text(s.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                    if (s.year.isNotBlank()) Text(s.year, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(s.name, maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall)
+                    if (s.year.isNotBlank()) Text(s.year, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -140,16 +146,22 @@ private fun SeriesDetail(series: SeriesItem, onBack: () -> Unit) {
             .onSuccess { episodes = it; season = it.firstOrNull()?.season ?: -1 }
             .onFailure { error = it.message ?: "Failed to load episodes" }
     }
-    Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-        Column(Modifier.width(260.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            TextButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Back") }
-            Poster(series.poster, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
-            Text(series.name, style = MaterialTheme.typography.titleMedium)
+    val firstFocus = remember { FocusRequester() }
+    LaunchedEffect(episodes, season) { if (episodes != null) runCatching { firstFocus.requestFocus() } }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val narrow = maxWidth < 600.dp
+    val info: @Composable (Modifier) -> Unit = { m ->
+        Column(m, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextButton(onClick = onBack, modifier = Modifier.tvFocus()) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Back") }
+            if (!narrow) Poster(series.poster, Modifier.fillMaxWidth().aspectRatio(2f / 3f))
+            Text(series.name, style = MaterialTheme.typography.titleLarge)
             val meta = listOf(series.year, series.rating.takeIf { it.isNotBlank() && it != "0" }?.let { "★ $it" }, series.group).filterNotNull().filter { it.isNotBlank() }.joinToString("  ·  ")
-            if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            if (series.plot.isNotBlank()) Text(series.plot, style = MaterialTheme.typography.bodySmall, maxLines = 10, overflow = TextOverflow.Ellipsis)
+            if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (series.plot.isNotBlank()) Text(series.plot, style = MaterialTheme.typography.bodyMedium, maxLines = if (narrow) 3 else 10, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Column(Modifier.weight(1f)) {
+    }
+    val list: @Composable (Modifier) -> Unit = { m ->
+        Column(m) {
             val eps = episodes
             when {
                 error != null -> EmptyState("Could not load episodes: $error")
@@ -165,20 +177,29 @@ private fun SeriesDetail(series: SeriesItem, onBack: () -> Unit) {
                         }
                     }
                     LazyColumn(Modifier.fillMaxSize()) {
-                        items(eps.filter { it.season == season }, key = { it.id }) { e ->
-                            FocusableRow(onClick = { PlayerActivity.playUrl(context, e.url, "${series.name} S${e.season}E${e.episode} ${e.title}".trim()) }) {
-                                if (e.poster.isNotBlank()) { AsyncImage(model = e.poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(width = 96.dp, height = 54.dp).clip(RoundedCornerShape(6.dp))); Spacer(Modifier.width(12.dp)) }
-                                Text("E${e.episode}", Modifier.width(44.dp), color = MaterialTheme.colorScheme.primary)
+                        itemsIndexed(eps.filter { it.season == season }, key = { _, e -> e.id }) { i, e ->
+                            FocusableRow(
+                                onClick = { PlayerActivity.playUrl(context, e.url, "${series.name} S${e.season}E${e.episode} ${e.title}".trim()) },
+                                modifier = if (i == 0) Modifier.focusRequester(firstFocus) else Modifier,
+                            ) {
+                                if (e.poster.isNotBlank()) { AsyncImage(model = e.poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(width = 112.dp, height = 63.dp).clip(MaterialTheme.shapes.small)); Spacer(Modifier.width(12.dp)) }
+                                Text("E${e.episode}", Modifier.width(48.dp), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
                                 Column(Modifier.weight(1f)) {
-                                    Text(e.title.ifBlank { "Episode ${e.episode}" }, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    if (e.plot.isNotBlank()) Text(e.plot, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(e.title.ifBlank { "Episode ${e.episode}" }, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                                    if (e.plot.isNotBlank()) Text(e.plot, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
-                                if (e.duration.isNotBlank()) Text(e.duration, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (e.duration.isNotBlank()) Text(e.duration, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
             }
         }
+    }
+    if (narrow) {
+        Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { info(Modifier.fillMaxWidth()); list(Modifier.weight(1f)) }
+    } else {
+        Row(Modifier.fillMaxSize().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) { info(Modifier.width(240.dp)); list(Modifier.weight(1f)) }
+    }
     }
 }

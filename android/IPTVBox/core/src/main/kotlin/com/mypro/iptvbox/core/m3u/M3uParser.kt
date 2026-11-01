@@ -37,6 +37,15 @@ object M3uParser {
         var epgUrl = ""
         var defaultCatchupDays = 0
         var defaultCatchupSource = ""
+        var defaultCatchupType = ""
+        // The same stream is often listed in several groups: make ids unique per occurrence
+        // (still stable across refreshes because playlist order is stable).
+        val seen = HashMap<String, Int>()
+        fun uniqueId(vararg parts: String): String {
+            val base = Ids.stable(*parts)
+            val n = seen.merge(base, 1, Int::plus)!!
+            return if (n == 1) base else Ids.stable(base, n.toString())
+        }
 
         var pendingInf: String? = null
         var pendingGroup = ""
@@ -64,12 +73,13 @@ object M3uParser {
             val catchupDays = (attrs["catchup-days"] ?: attrs["tvg-rec"])?.toIntOrNull()
                 ?: if (attrs["catchup"].isNullOrBlank()) defaultCatchupDays else 1
             val catchupSource = attrs["catchup-source"] ?: defaultCatchupSource
+            val catchupType = (attrs["catchup"] ?: attrs["catchup-type"] ?: defaultCatchupType).lowercase().trim()
             when (type) {
                 ContentType.LIVE -> {
                     liveNumber++
                     val number = attrs["tvg-chno"]?.toIntOrNull() ?: attrs["channel-number"]?.toIntOrNull() ?: liveNumber
                     channels += Channel(
-                        id = Ids.stable(playlistId, url, name),
+                        id = uniqueId(playlistId, url, name),
                         playlistId = playlistId,
                         name = name,
                         url = url,
@@ -81,12 +91,15 @@ object M3uParser {
                         type = ContentType.LIVE,
                         catchupDays = catchupDays,
                         catchupSource = catchupSource,
+                        catchupType = catchupType,
                         headers = headers,
                         extension = url.substringAfterLast('.', "").take(5),
+                        country = attrs["tvg-country"] ?: "",
+                        language = attrs["tvg-language"] ?: "",
                     )
                 }
                 ContentType.MOVIE -> movies += VodItem(
-                    id = Ids.stable(playlistId, url, name),
+                    id = uniqueId(playlistId, url, name),
                     playlistId = playlistId,
                     name = name,
                     url = url,
@@ -98,7 +111,7 @@ object M3uParser {
                     // M3U series are flat: "Show S01 E02". We keep them as movies grouped under
                     // the show name so they remain playable; the Xtream API gives real seasons.
                     movies += VodItem(
-                        id = Ids.stable(playlistId, url, name),
+                        id = uniqueId(playlistId, url, name),
                         playlistId = playlistId,
                         name = name,
                         url = url,
@@ -123,6 +136,7 @@ object M3uParser {
                     epgUrl = attrs["url-tvg"] ?: attrs["x-tvg-url"] ?: attrs["tvg-url"] ?: ""
                     defaultCatchupDays = attrs["catchup-days"]?.toIntOrNull() ?: 0
                     defaultCatchupSource = attrs["catchup-source"] ?: ""
+                    defaultCatchupType = (attrs["catchup"] ?: attrs["catchup-type"] ?: "").lowercase()
                     if (defaultCatchupDays == 0 && !attrs["catchup"].isNullOrBlank()) defaultCatchupDays = 1
                 }
                 line.startsWith("#EXTINF", ignoreCase = true) -> {
