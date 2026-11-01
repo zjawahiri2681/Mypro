@@ -1,5 +1,6 @@
 package com.mypro.iptvbox.ui.screens
 
+import com.mypro.iptvbox.ui.tvFocus
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +31,8 @@ import com.mypro.iptvbox.data.BufferMode
 import com.mypro.iptvbox.data.DecoderMode
 import com.mypro.iptvbox.data.LiveFormat
 import com.mypro.iptvbox.data.QualityCap
+import com.mypro.iptvbox.data.TextColorId
+import com.mypro.iptvbox.data.TextSize
 import com.mypro.iptvbox.data.ThemeId
 import com.mypro.iptvbox.core.util.GroupMode
 import com.mypro.iptvbox.core.util.SortMode
@@ -49,6 +52,16 @@ fun SettingsScreen() {
         LazyRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(ThemeId.entries) { t -> ThemeSwatch(t, selected = t == s.theme) { set { it.copy(theme = t) } } }
         }
+        Text("Text colour: ${s.textColor.label}", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp))
+        LazyRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(TextColorId.entries) { c -> TextColorSwatch(c, background = Color(s.theme.surface), selected = c == s.textColor) { set { it.copy(textColor = c) } } }
+        }
+        CycleRow("Text size", s.textSize.label, "Applies to the whole app. TV boxes already start 15% larger.") { set { it.copy(textSize = next(it.textSize)) } }
+        Text(
+            "Preview: The quick brown fox · Now 20:00 News at Eight",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp).background(MaterialTheme.colorScheme.surface, MaterialTheme.shapes.small).padding(horizontal = 14.dp, vertical = 10.dp),
+        )
 
         Group("Playback")
         CycleRow("Video quality", s.qualityCap.label, "Caps the resolution on streams that offer several (HLS/DASH). Also changeable per stream from the player menu.") { set { it.copy(qualityCap = next(it.qualityCap)) } }
@@ -68,7 +81,7 @@ fun SettingsScreen() {
         SwitchRow("Show channel numbers", s.showChannelNumbers) { set { it.copy(showChannelNumbers = !it.showChannelNumbers) } }
         CycleRow("Refresh programme guide every", "${s.epgRefreshHours} h") { set { it.copy(epgRefreshHours = listOf(6, 12, 24).let { l -> l[(l.indexOf(it.epgRefreshHours) + 1) % l.size] }) } }
         FocusableRow(onClick = { IptvApp.repo.refreshEpg() }, modifier = Modifier.padding(horizontal = 12.dp)) {
-            Column { Text("Reload programme guide now", style = MaterialTheme.typography.bodyLarge); Text("Downloads the XMLTV guide again.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Column { Text("Reload programme guide now", style = MaterialTheme.typography.bodyLarge); Text("Downloads the XMLTV guide again.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
 
         Group("Network")
@@ -81,12 +94,33 @@ fun SettingsScreen() {
         Group("About")
         Text(
             "IPTV Box ${BuildConfig.VERSION_NAME} · personal build.\nPlays M3U/M3U8 playlists, Xtream Codes and Stalker portals with EPG, catch-up, favourites, VOD and series, plus synchronised watch parties.\nThis app contains no channels or content; it only plays what your own playlists and files provide.",
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
     }
 }
 
 private inline fun <reified E : Enum<E>> next(e: E): E { val v = enumValues<E>(); return v[(e.ordinal + 1) % v.size] }
+
+@Composable
+private fun TextColorSwatch(c: TextColorId, background: Color, selected: Boolean, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val ring = MaterialTheme.colorScheme.primary
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(96.dp)) {
+        Box(
+            Modifier.size(width = 84.dp, height = 52.dp)
+                .onFocusChanged { focused = it.isFocused }
+                .clip(MaterialTheme.shapes.small)
+                .background(background)
+                .border(if (focused || selected) 3.dp else 1.dp, if (focused) Color.White else if (selected) ring else Color.White.copy(alpha = 0.25f), MaterialTheme.shapes.small)
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Aa", color = Color(c.argb), style = MaterialTheme.typography.titleLarge)
+            if (selected) Icon(Icons.Default.Check, null, tint = ring, modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(14.dp))
+        }
+        Text(c.label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+    }
+}
 
 @Composable
 private fun ThemeSwatch(t: ThemeId, selected: Boolean, onClick: () -> Unit) {
@@ -104,7 +138,7 @@ private fun ThemeSwatch(t: ThemeId, selected: Boolean, onClick: () -> Unit) {
             Box(Modifier.size(22.dp).clip(CircleShape).background(Color(t.background)))
             if (selected) Icon(Icons.Default.Check, null, tint = Color.White, modifier = Modifier.size(18.dp))
         }
-        Text(t.label.substringBefore(" ("), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        Text(t.label.substringBefore(" ("), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
     }
 }
 
@@ -118,7 +152,7 @@ private fun CycleRow(title: String, value: String, hint: String = "", onClick: (
     FocusableRow(onClick = onClick, modifier = Modifier.padding(horizontal = 12.dp)) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (hint.isNotBlank()) Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (hint.isNotBlank()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 260.dp))
     }
@@ -129,7 +163,7 @@ private fun SwitchRow(title: String, checked: Boolean, hint: String = "", onTogg
     FocusableRow(onClick = onToggle, modifier = Modifier.padding(horizontal = 12.dp)) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (hint.isNotBlank()) Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (hint.isNotBlank()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = { onToggle() }, modifier = Modifier.focusProperties { canFocus = false })
     }
@@ -142,7 +176,7 @@ private fun TextRow(title: String, value: String, hint: String = "", onChange: (
     FocusableRow(onClick = { draft = value; editing = true }, modifier = Modifier.padding(horizontal = 12.dp)) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
-            if (hint.isNotBlank()) Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (hint.isNotBlank()) Text(hint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Text(value.ifBlank { "—" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 260.dp))
     }
@@ -151,8 +185,8 @@ private fun TextRow(title: String, value: String, hint: String = "", onChange: (
             onDismissRequest = { editing = false },
             title = { Text(title) },
             text = { OutlinedTextField(value = draft, onValueChange = { draft = it }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
-            confirmButton = { Button(onClick = { onChange(draft.trim()); editing = false }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel") } },
+            confirmButton = { Button(modifier = Modifier.tvFocus(), onClick = { onChange(draft.trim()); editing = false }) { Text("Save") } },
+            dismissButton = { TextButton(modifier = Modifier.tvFocus(), onClick = { editing = false }) { Text("Cancel") } },
         )
     }
 }

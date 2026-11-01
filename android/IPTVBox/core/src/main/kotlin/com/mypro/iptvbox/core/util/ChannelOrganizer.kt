@@ -15,6 +15,16 @@ class ChannelOrganizer(val channels: List<Channel>) {
     private val country: Map<String, Regions.Country?> = channels.associate { it.id to Regions.detectCountry(it) }
     private val language: Map<String, String> = channels.associate { ch -> ch.id to (Regions.detectLanguage(ch, country[ch.id]) ?: OTHER) }
 
+    private val normalized: Map<String, String> = channels.associate { it.id to TextUtil.normalize(it.name) }
+
+    /** Name/number search using names normalized once up front (fast on 50k-channel lists). */
+    fun search(list: List<Channel>, query: String): List<Channel> {
+        if (query.isBlank()) return list
+        val q = TextUtil.normalize(query)
+        val num = query.trim()
+        return list.filter { (normalized[it.id] ?: TextUtil.normalize(it.name)).contains(q) || it.number.toString() == num }
+    }
+
     fun countryOf(ch: Channel): Regions.Country? = country[ch.id]
     fun languageOf(ch: Channel): String = language[ch.id] ?: OTHER
 

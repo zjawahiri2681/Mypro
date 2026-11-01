@@ -1,5 +1,6 @@
 package com.mypro.iptvbox.player
 
+import com.mypro.iptvbox.ui.tvFocus
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -51,6 +52,8 @@ import com.mypro.iptvbox.core.sync.WatchLink
 import com.mypro.iptvbox.core.util.TextUtil
 import com.mypro.iptvbox.data.QualityCap
 import com.mypro.iptvbox.ui.FocusableRow
+import com.mypro.iptvbox.ui.LocalIsTv
+import com.mypro.iptvbox.ui.panelColor
 import com.mypro.iptvbox.util.QrCode
 import com.mypro.iptvbox.watch.WatchSession
 import kotlinx.coroutines.delay
@@ -132,7 +135,7 @@ fun PlayerScreen(ui: PlayerUiState, player: ExoPlayer, actions: PlayerActions) {
             }
             Surface(
                 color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 12.dp),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = if (LocalIsTv.current) 27.dp else 12.dp),
             ) {
                 Row(Modifier.padding(horizontal = 14.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Groups, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
@@ -147,6 +150,24 @@ fun PlayerScreen(ui: PlayerUiState, player: ExoPlayer, actions: PlayerActions) {
                 color = Color.Black.copy(alpha = 0.75f), shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp),
             ) { Text(ui.toast, Modifier.padding(horizontal = 18.dp, vertical = 10.dp), color = Color.White) }
+        }
+
+        // BACK: clear a typed number, then hide the info bar, then (in a watch party) confirm before leaving.
+        BackHandler(enabled = !ui.anyPanel && (ui.numberInput.isNotEmpty() || ui.overlay || watch.role != WatchSession.Role.NONE)) {
+            when {
+                ui.numberInput.isNotEmpty() -> ui.numberInput = ""
+                ui.overlay -> ui.overlay = false
+                else -> ui.confirmLeave = true
+            }
+        }
+        if (ui.confirmLeave) {
+            AlertDialog(
+                onDismissRequest = { ui.confirmLeave = false },
+                title = { Text(if (watch.role == WatchSession.Role.HOST) "End the watch party?" else "Leave the watch party?") },
+                text = { Text(if (watch.role == WatchSession.Role.HOST) "Closing the player stops syncing for everyone who joined." else "You will stop watching in sync with ${watch.lastRemoteName.ifBlank { "the host" }}.") },
+                confirmButton = { Button(onClick = { ui.confirmLeave = false; actions.exit() }, modifier = Modifier.tvFocus()) { Text("Leave") } },
+                dismissButton = { TextButton(onClick = { ui.confirmLeave = false }, modifier = Modifier.tvFocus()) { Text("Stay") } },
+            )
         }
 
         if (ui.channelList) ChannelListPanel(ui, actions)
@@ -164,7 +185,7 @@ private fun InfoOverlay(ui: PlayerUiState, actions: PlayerActions, showNumbers: 
         // Top: channel / title / EPG
         Column(
             Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)))
-                .padding(horizontal = 28.dp, vertical = 20.dp),
+                .padding(horizontal = if (LocalIsTv.current) 48.dp else 28.dp, vertical = if (LocalIsTv.current) 27.dp else 20.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (ui.logo.isNotBlank()) {
@@ -204,7 +225,7 @@ private fun InfoOverlay(ui: PlayerUiState, actions: PlayerActions, showNumbers: 
         Column(
             Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                 .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))))
-                .padding(horizontal = 28.dp, vertical = 16.dp),
+                .padding(horizontal = if (LocalIsTv.current) 48.dp else 28.dp, vertical = if (LocalIsTv.current) 27.dp else 16.dp),
         ) {
             if (!ui.isLive && ui.duration > 0) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -237,9 +258,9 @@ private fun InfoOverlay(ui: PlayerUiState, actions: PlayerActions, showNumbers: 
                 IconButton(onClick = { actions.showHostPicker() }, modifier = Modifier.touchOnly()) { Icon(Icons.Default.Groups, "Watch together", tint = Color.White) }
                 Spacer(Modifier.weight(1f))
                 Text(
-                    if (ui.channel != null) "OK: channel list   ◀ ▶: guide   ▲ ▼: zap   0-9: number   MENU: options"
-                    else if (ui.isLive) "OK: play/pause   MENU: options" else "OK: play/pause   ◀ ▶: seek 10 s   MENU: options",
-                    color = Color.White.copy(alpha = 0.6f), style = MaterialTheme.typography.labelMedium,
+                    if (ui.channel != null) "OK: channels   ◀ ▶: guide   ▲ ▼: zap   0-9: number   Hold OK: options"
+                    else if (ui.isLive) "OK: play/pause   Hold OK: options" else "OK: play/pause   ◀ ▶: seek 10 s   Hold OK: options",
+                    color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.labelLarge,
                 )
             }
         }
@@ -251,7 +272,8 @@ private fun SidePanel(alignEnd: Boolean, width: Int, onDismiss: () -> Unit, cont
     BackHandler(onBack = onDismiss)
     Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) }) {
         Surface(
-            color = Color(0xEE0F1626),
+            color = panelColor(),
+            contentColor = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxHeight().width(width.dp).align(if (alignEnd) Alignment.CenterEnd else Alignment.CenterStart)
                 .pointerInput(Unit) { detectTapGestures(onTap = {}) },
         ) {
@@ -296,11 +318,11 @@ private fun ChannelListPanel(ui: PlayerUiState, actions: PlayerActions) {
             IconButton(onClick = { groupIndex = (groupIndex + 1) % groups.size }, modifier = Modifier.touchOnly()) { Icon(Icons.Default.ChevronRight, "Next group") }
         }
         Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("${channels.size} channels · ◀ ▶ switch group", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            Text("${channels.size} channels · ◀ ▶ switch group", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             FocusableRow(onClick = { actions.cycleGroupMode(); groupIndex = 0 }, modifier = Modifier.width(IntrinsicSize.Max), padding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
                 Icon(Icons.Default.Public, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(4.dp))
-                Text(actions.groupModeLabel(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                Text(actions.groupModeLabel(), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             }
         }
         if (channels.isEmpty()) {
@@ -333,7 +355,7 @@ private fun ChannelListPanel(ui: PlayerUiState, actions: PlayerActions) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(c.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-                        if (now != null) Text(now.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (now != null) Text(now.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     if (c.catchupDays > 0) Icon(Icons.Default.History, "Catch-up", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                 }
@@ -364,7 +386,7 @@ private fun EpgPanel(channel: Channel, actions: PlayerActions, onDismiss: () -> 
         Text(channel.name, style = MaterialTheme.typography.titleMedium)
         Text(
             if (channel.catchupDays > 0) "Programme guide · catch-up available (${channel.catchupDays} day${if (channel.catchupDays > 1) "s" else ""})" else "Programme guide",
-            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp),
+            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp),
         )
         when {
             loading -> Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -381,11 +403,11 @@ private fun EpgPanel(channel: Channel, actions: PlayerActions, onDismiss: () -> 
                     ) {
                         Column(Modifier.width(96.dp)) {
                             Text(fmtTime(p.start), style = MaterialTheme.typography.bodyMedium, color = if (past && !isLive) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-                            Text(fmtTime(p.stop), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(fmtTime(p.stop), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Column(Modifier.weight(1f)) {
                             Text(p.title, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, color = if (past && !isLive && !canCatchup) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
-                            if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (p.description.isNotBlank()) Text(p.description, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         if (isLive) Badge(containerColor = MaterialTheme.colorScheme.error) { Text("LIVE") }
                         else if (canCatchup) Icon(Icons.Default.Replay, "Play from start", tint = MaterialTheme.colorScheme.primary)
@@ -448,7 +470,7 @@ private fun MenuPanel(ui: PlayerUiState, actions: PlayerActions, watch: WatchSes
                             MenuItem(if (ui.quality == t.label) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked, t.label) { actions.selectVideoTrack(t); sub = null }
                         }
                     } else {
-                        item { Text(if (tracks.isEmpty()) "No video track information yet." else "This stream has a single quality; presets apply to streams that offer several.", Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        item { Text(if (tracks.isEmpty()) "No video track information yet." else "This stream has a single quality; presets apply to streams that offer several.", Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
                 "Audio track" -> {
@@ -492,14 +514,14 @@ private fun HostPickerDialog(ui: PlayerUiState, actions: PlayerActions) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Start a party for what is playing now. Everyone who opens the invitation plays the same thing in sync; anyone can pause, play or seek.")
-                Text("For a local video file, the other person needs the same file on their device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("For a local video file, the other person needs the same file on their device.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         confirmButton = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = { actions.startHosting(WatchLink.Mode.RELAY) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Public, null); Spacer(Modifier.width(8.dp)); Text("Over the internet") }
-                OutlinedButton(onClick = { actions.startHosting(WatchLink.Mode.LAN) }, modifier = Modifier.fillMaxWidth()) { Icon(Icons.Default.Wifi, null); Spacer(Modifier.width(8.dp)); Text("Same Wi-Fi only (no internet needed)") }
-                TextButton(onClick = { ui.hostPicker = false }, modifier = Modifier.fillMaxWidth()) { Text("Cancel") }
+                Button(onClick = { actions.startHosting(WatchLink.Mode.RELAY) }, modifier = Modifier.tvFocus().fillMaxWidth()) { Icon(Icons.Default.Public, null); Spacer(Modifier.width(8.dp)); Text("Over the internet") }
+                OutlinedButton(onClick = { actions.startHosting(WatchLink.Mode.LAN) }, modifier = Modifier.tvFocus().fillMaxWidth()) { Icon(Icons.Default.Wifi, null); Spacer(Modifier.width(8.dp)); Text("Same Wi-Fi only (no internet needed)") }
+                TextButton(onClick = { ui.hostPicker = false }, modifier = Modifier.tvFocus().fillMaxWidth()) { Text("Cancel") }
             }
         },
     )
@@ -520,11 +542,17 @@ fun InviteDialog(link: WatchLink, watch: WatchSession.State, onDismiss: () -> Un
                     Text("Room ${link.shortCode()} · ${if (link.mode == WatchLink.Mode.LAN) "same Wi-Fi (${link.host})" else "internet relay"}", style = MaterialTheme.typography.titleSmall)
                     Text(
                         if (link.media.kind == MediaRef.Kind.FILE) "Playing a local file: ${link.media.name}. The other person needs the same file." else "Playing: ${link.media.name.ifBlank { link.media.url }}",
-                        style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis,
                     )
-                    Text("Send this link; opening it on another phone, tablet or TV box with IPTV Box installed joins the party. It can also be pasted under Watch Together.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Send this link; opening it on another phone, tablet or TV box with IPTV Box installed joins the party. It can also be pasted under Watch Together.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (link.media.kind == MediaRef.Kind.URL && Regex("""(?i)(username=|password=|/(live|movie|series|timeshift)/[^/]+/[^/]+/)""").containsMatchIn(link.media.url)) {
+                        Text(
+                            "⚠ This link contains your IPTV account login. Share it only with people you trust; accounts limited to one connection may disconnect one of you.",
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
                     androidx.compose.foundation.text.selection.SelectionContainer {
-                        Text(uri, style = MaterialTheme.typography.labelSmall, maxLines = 3, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
+                        Text(uri, style = MaterialTheme.typography.labelMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.primary)
                     }
                     Text(watch.status.ifBlank { "Waiting…" } + if (watch.peers > 0) " · ${watch.peers} connected" else "", style = MaterialTheme.typography.labelMedium)
                 }
@@ -532,16 +560,16 @@ fun InviteDialog(link: WatchLink, watch: WatchSession.State, onDismiss: () -> Un
         },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = {
+                TextButton(modifier = Modifier.tvFocus(), onClick = {
                     val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                     cm.setPrimaryClip(android.content.ClipData.newPlainText("IPTV Box invitation", uri))
                 }) { Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(6.dp)); Text("Copy") }
-                Button(onClick = {
+                Button(modifier = Modifier.tvFocus(), onClick = {
                     val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(android.content.Intent.EXTRA_TEXT, "Watch with me on IPTV Box:\n$uri")
                     runCatching { context.startActivity(android.content.Intent.createChooser(send, "Share invitation")) }
                 }) { Icon(Icons.Default.Share, null); Spacer(Modifier.width(6.dp)); Text("Share") }
-                TextButton(onClick = onDismiss) { Text("Close") }
+                TextButton(modifier = Modifier.tvFocus(), onClick = onDismiss) { Text("Close") }
             }
         },
     )
@@ -556,9 +584,9 @@ private fun ErrorDialog(message: String, ui: PlayerUiState, actions: PlayerActio
         text = { Text(message) },
         confirmButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { actions.retry() }) { Text("Retry") }
-                if (ui.channel != null) OutlinedButton(onClick = { ui.error = null; actions.zap(1) }) { Text("Next channel") }
-                TextButton(onClick = { actions.exit() }) { Text("Close") }
+                Button(modifier = Modifier.tvFocus(), onClick = { actions.retry() }) { Text("Retry") }
+                if (ui.channel != null) OutlinedButton(modifier = Modifier.tvFocus(), onClick = { ui.error = null; actions.zap(1) }) { Text("Next channel") }
+                TextButton(modifier = Modifier.tvFocus(), onClick = { actions.exit() }) { Text("Close") }
             }
         },
     )

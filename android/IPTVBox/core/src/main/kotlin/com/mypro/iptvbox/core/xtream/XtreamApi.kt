@@ -224,20 +224,27 @@ class XtreamApi(val playlist: Playlist) {
         if (ext == "m3u8") "$base/live/${enc(user)}/${enc(pass)}/$streamId.m3u8"
         else "$base/live/${enc(user)}/${enc(pass)}/$streamId.ts"
 
-    /** Catch-up / timeshift URL for a programme that already aired. */
-    fun catchupUrl(channel: Channel, startUtcMs: Long, durationMs: Long, serverTimeOffsetMs: Long = 0L): String {
-        val fmt = SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
-        val durationMin = (durationMs / 60_000).coerceAtLeast(1)
-        val start = fmt.format(java.util.Date(startUtcMs))
-        return "$base/timeshift/${enc(user)}/${enc(pass)}/$durationMin/$start/${channel.providerId}.ts"
-    }
+    /**
+     * Catch-up / timeshift URL for a programme that already aired. Panels read the start time
+     * in their own timezone (server_info.timezone), not UTC.
+     */
+    fun catchupUrl(channel: Channel, startUtcMs: Long, durationMs: Long, serverTimezone: String = ""): String =
+        buildCatchupUrl(base, user, pass, channel.providerId, startUtcMs, durationMs, serverTimezone)
 
     val epgUrl: String get() = "$base/xmltv.php?username=${enc(user)}&password=${enc(pass)}"
 
     /** Loads everything in one go. */
     fun loadAll(includeVod: Boolean = true, liveExt: String = "ts"): PlaylistContent {
         val account = authenticate()
-        val live = liveChannels(liveExt)
+        // Respect accounts that only allow one output format.
+        val formats = account.allowedFormats.map { it.lowercase() }
+        val ext = when {
+            formats.isEmpty() || liveExt in formats -> liveExt
+            "m3u8" in formats -> "m3u8"
+            "ts" in formats -> "ts"
+            else -> liveExt
+        }
+        val live = liveChannels(ext)
         val movies = if (includeVod) runCatching { movies() }.getOrDefault(emptyList()) else emptyList()
         val series = if (includeVod) runCatching { series() }.getOrDefault(emptyList()) else emptyList()
         return PlaylistContent(
@@ -248,6 +255,7 @@ class XtreamApi(val playlist: Playlist) {
             epgUrl = playlist.epgUrl.ifBlank { epgUrl },
             loadedAt = System.currentTimeMillis(),
             serverTimeOffsetMs = account.serverTimeOffsetMs,
+            serverTimezone = account.timezone,
         )
     }
 
@@ -276,6 +284,14 @@ class XtreamApi(val playlist: Playlist) {
         }
 
         private fun enc(s: String) = URLEncoder.encode(s, "UTF-8").replace("+", "%20")
+
+        fun buildCatchupUrl(base: String, user: String, pass: String, streamId: String, startUtcMs: Long, durationMs: Long, serverTimezone: String): String {
+            val tz = if (serverTimezone.isBlank()) TimeZone.getTimeZone("UTC") else TimeZone.getTimeZone(serverTimezone)
+            val fmt = SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US).apply { timeZone = tz }
+            val durationMin = ((durationMs + 59_999) / 60_000).coerceAtLeast(1)
+            val start = fmt.format(java.util.Date(startUtcMs))
+            return "${normalizeBase(base)}/timeshift/${enc(user)}/${enc(pass)}/$durationMin/$start/$streamId.ts"
+        }
 
         private fun b64(s: String): String = try {
             if (s.isEmpty()) s else String(Base64.getDecoder().decode(s.trim()), Charsets.UTF_8)

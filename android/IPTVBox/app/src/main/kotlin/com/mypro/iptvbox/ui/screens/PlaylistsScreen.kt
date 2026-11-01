@@ -1,5 +1,6 @@
 package com.mypro.iptvbox.ui.screens
 
+import com.mypro.iptvbox.ui.tvFocus
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -15,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -50,7 +52,7 @@ fun PlaylistsScreen() {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             SectionTitle("Playlists", Modifier.weight(1f))
-            Button(onClick = { adding = true }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Add playlist") }
+            Button(modifier = Modifier.tvFocus(), onClick = { adding = true }) { Icon(Icons.Default.Add, null); Spacer(Modifier.width(6.dp)); Text("Add playlist") }
         }
         if (playlists.isEmpty()) {
             EmptyState("Add your first playlist: an M3U/M3U8 link or file, an Xtream Codes login (server, username, password) or a Stalker/MAG portal.")
@@ -67,19 +69,19 @@ fun PlaylistsScreen() {
                             Text(
                                 when (p.type) { SourceType.M3U_URL -> "M3U link"; SourceType.M3U_FILE -> "M3U file"; SourceType.XTREAM -> "Xtream Codes"; SourceType.STALKER -> "Stalker portal" } +
                                     "  ·  " + p.url.take(70),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                             if (isActive && content != null) {
                                 Text(
                                     "${content!!.channels.size} channels · ${content!!.movies.size} movies · ${content!!.series.size} series · updated ${DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(content!!.loadedAt))}",
-                                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (!isActive) Button(onClick = { repo.setActive(p.id) }) { Text("Use") }
-                                else OutlinedButton(onClick = { repo.refreshActive(force = true) }) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Refresh") }
-                                OutlinedButton(onClick = { editing = p }) { Icon(Icons.Default.Edit, null); Spacer(Modifier.width(6.dp)); Text("Edit") }
-                                TextButton(onClick = { confirmDelete = p }) { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error); Spacer(Modifier.width(6.dp)); Text("Delete", color = MaterialTheme.colorScheme.error) }
+                                if (!isActive) Button(modifier = Modifier.tvFocus(), onClick = { repo.setActive(p.id) }) { Text("Use") }
+                                else OutlinedButton(modifier = Modifier.tvFocus(), onClick = { repo.refreshActive(force = true) }) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(6.dp)); Text("Refresh") }
+                                OutlinedButton(modifier = Modifier.tvFocus(), onClick = { editing = p }) { Icon(Icons.Default.Edit, null); Spacer(Modifier.width(6.dp)); Text("Edit") }
+                                TextButton(modifier = Modifier.tvFocus(), onClick = { confirmDelete = p }) { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error); Spacer(Modifier.width(6.dp)); Text("Delete", color = MaterialTheme.colorScheme.error) }
                             }
                         }
                     }
@@ -92,8 +94,8 @@ fun PlaylistsScreen() {
             onDismissRequest = { confirmDelete = null },
             title = { Text("Delete “${p.name}”?") },
             text = { Text("The playlist, its cached channels and guide are removed from this device. Favourites are kept.") },
-            confirmButton = { Button(onClick = { repo.deletePlaylist(p.id); confirmDelete = null }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } },
+            confirmButton = { Button(modifier = Modifier.tvFocus(), onClick = { repo.deletePlaylist(p.id); confirmDelete = null }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Delete") } },
+            dismissButton = { TextButton(modifier = Modifier.tvFocus(), onClick = { confirmDelete = null }) { Text("Cancel") } },
         )
     }
 }
@@ -116,6 +118,8 @@ private fun PlaylistEditor(initial: Playlist?, onDone: () -> Unit) {
     var testResult by remember { mutableStateOf<String?>(null) }
     var fileName by remember { mutableStateOf("") }
     BackHandler(onBack = onDone)
+    val firstFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { firstFocus.requestFocus() } }
 
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
@@ -146,13 +150,13 @@ private fun PlaylistEditor(initial: Playlist?, onDone: () -> Unit) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onDone) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Back") }
+            TextButton(modifier = Modifier.tvFocus(), onClick = onDone) { Icon(Icons.Default.ArrowBack, null); Spacer(Modifier.width(6.dp)); Text("Back") }
             Text(if (initial == null) "Add playlist" else "Edit playlist", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 8.dp))
         }
         Text("Source type", style = MaterialTheme.typography.labelLarge)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             for ((t, label) in listOf(SourceType.M3U_URL to "M3U link", SourceType.M3U_FILE to "M3U file", SourceType.XTREAM to "Xtream Codes", SourceType.STALKER to "Stalker portal")) {
-                FocusableRow(onClick = { type = t }, selected = t == type, modifier = Modifier.width(IntrinsicSize.Max), padding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
+                FocusableRow(onClick = { type = t }, selected = t == type, modifier = Modifier.width(IntrinsicSize.Max).then(if (t == type) Modifier.focusRequester(firstFocus) else Modifier), padding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
                     Icon(if (t == type) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked, null, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp)); Text(label)
                 }
             }
@@ -161,7 +165,7 @@ private fun PlaylistEditor(initial: Playlist?, onDone: () -> Unit) {
         when (type) {
             SourceType.M3U_URL -> OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("Playlist URL (http://…/get.php?… or any .m3u/.m3u8 link)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             SourceType.M3U_FILE -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { filePicker.launch(arrayOf("*/*")) }) { Icon(Icons.Default.FolderOpen, null); Spacer(Modifier.width(6.dp)); Text("Choose .m3u file") }
+                Button(modifier = Modifier.tvFocus(), onClick = { filePicker.launch(arrayOf("*/*")) }) { Icon(Icons.Default.FolderOpen, null); Spacer(Modifier.width(6.dp)); Text("Choose .m3u file") }
                 Text(fileName.ifBlank { if (url.isNotBlank()) "File selected" else "No file selected" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             SourceType.XTREAM -> {
@@ -178,20 +182,20 @@ private fun PlaylistEditor(initial: Playlist?, onDone: () -> Unit) {
             SourceType.STALKER -> {
                 OutlinedTextField(value = url, onValueChange = { url = it }, label = { Text("Portal URL (http://host/c/ or http://host/stalker_portal/)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(value = mac, onValueChange = { mac = it.uppercase() }, label = { Text("MAC address") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Text("Experimental: portals vary; live TV only.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Experimental: portals vary; live TV only.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         OutlinedTextField(value = epgUrl, onValueChange = { epgUrl = it }, label = { Text("EPG / XMLTV URL (optional - auto-detected when the playlist provides one)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = userAgent, onValueChange = { userAgent = it }, label = { Text("User-Agent (optional, some providers require a specific one)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(onClick = {
+            OutlinedButton(modifier = Modifier.tvFocus(), onClick = {
                 testing = true; testResult = null
                 scope.launch { testResult = repo.test(build()).fold({ "OK: $it" }, { "Failed: ${it.message ?: it}" }); testing = false }
             }, enabled = valid && !testing) {
                 if (testing) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Icon(Icons.Default.NetworkCheck, null)
                 Spacer(Modifier.width(6.dp)); Text("Test")
             }
-            Button(onClick = { repo.savePlaylist(build()); onDone() }, enabled = valid) { Icon(Icons.Default.Save, null); Spacer(Modifier.width(6.dp)); Text("Save") }
+            Button(modifier = Modifier.tvFocus(), onClick = { repo.savePlaylist(build()); onDone() }, enabled = valid) { Icon(Icons.Default.Save, null); Spacer(Modifier.width(6.dp)); Text("Save") }
         }
         testResult?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = if (it.startsWith("OK")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error) }
     }

@@ -34,6 +34,25 @@ enum class ThemeId(val label: String, val primary: Long, val secondary: Long, va
     MIDNIGHT("Midnight (OLED black)", 0xFF60A5FA, 0xFFF472B6, 0xFF000000, 0xFF0B0B0D, 0xFF17171B, 0xFF001A3A),
 }
 
+/** Text colour for all regular text (all themes are dark, so these are all light, high-contrast colours). */
+enum class TextColorId(val label: String, val argb: Long) {
+    SNOW("Snow white", 0xFFF7F9FC),
+    SOFT("Soft white", 0xFFE6EAF2),
+    IVORY("Warm ivory", 0xFFF6EBD3),
+    SILVER("Silver", 0xFFCBD5E1),
+    SKY("Sky blue", 0xFFBAE6FD),
+    MINT("Mint", 0xFFBBF7D0),
+    YELLOW("High-contrast yellow", 0xFFFFE45C),
+}
+
+/** Text size multiplier on top of the device setting (TV boxes get an extra boost automatically). */
+enum class TextSize(val label: String, val scale: Float) {
+    SMALL("Small", 0.9f),
+    NORMAL("Normal", 1.0f),
+    LARGE("Large", 1.15f),
+    XLARGE("Extra large", 1.3f),
+}
+
 /** Maximum video quality for adaptive (HLS/DASH) streams. */
 enum class QualityCap(val label: String, val maxHeight: Int) {
     AUTO("Auto (best available)", 0),
@@ -66,6 +85,8 @@ data class AppSettings(
     val qualityCap: QualityCap = QualityCap.AUTO,
     val groupMode: GroupMode = GroupMode.PROVIDER,
     val sortMode: SortMode = SortMode.NUMBER,
+    val textColor: TextColorId = TextColorId.SOFT,
+    val textSize: TextSize = TextSize.NORMAL,
 )
 
 class Settings(context: Context) {
@@ -96,6 +117,8 @@ class Settings(context: Context) {
         qualityCap = enumOr(prefs.getString("qualityCap", null), QualityCap.AUTO),
         groupMode = enumOr(prefs.getString("groupMode", null), GroupMode.PROVIDER),
         sortMode = enumOr(prefs.getString("sortMode", null), SortMode.NUMBER),
+        textColor = enumOr(prefs.getString("textColor", null), TextColorId.SOFT),
+        textSize = enumOr(prefs.getString("textSize", null), TextSize.NORMAL),
     )
 
     fun update(block: (AppSettings) -> AppSettings) {
@@ -123,6 +146,8 @@ class Settings(context: Context) {
             .putString("qualityCap", s.qualityCap.name)
             .putString("groupMode", s.groupMode.name)
             .putString("sortMode", s.sortMode.name)
+            .putString("textColor", s.textColor.name)
+            .putString("textSize", s.textSize.name)
             .apply()
     }
 

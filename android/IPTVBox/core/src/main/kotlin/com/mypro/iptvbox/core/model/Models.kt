@@ -43,6 +43,8 @@ data class Channel(
     /** Days of catch-up available (0 = none). */
     val catchupDays: Int = 0,
     val catchupSource: String = "",
+    /** M3U catch-up mode: default, append, shift, flussonic, xc ("" = none/unknown). */
+    val catchupType: String = "",
     /** Xtream stream id, Stalker channel id, etc. */
     val providerId: String = "",
     /** Extra HTTP headers encoded as key=value lines (from #EXTVLCOPT). */
@@ -123,4 +125,6 @@ data class PlaylistContent(
     val epgUrl: String = "",
     val loadedAt: Long = 0L,
     val serverTimeOffsetMs: Long = 0L,
+    /** IANA timezone of an Xtream panel (used to build catch-up URLs). */
+    val serverTimezone: String = "",
 )
