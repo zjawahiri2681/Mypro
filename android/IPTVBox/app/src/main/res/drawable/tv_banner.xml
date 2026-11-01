@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp" android:height="180dp"
+    android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#0B1F3A" android:pathData="M0,0h320v180H0z" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M40,50h90a6,6 0 0 1 6,6v58a6,6 0 0 1 -6,6H40a6,6 0 0 1 -6,-6V56a6,6 0 0 1 6,-6zM42,58v56h86V58z" />
+    <path android:fillColor="#2EC4B6" android:pathData="M72,70l32,16l-32,16z" />
+    <!-- Text drawn as simple blocks: IPTV BOX -->
+    <path android:fillColor="#FFFFFF" android:pathData="M160,70h10v40h-10z M176,70h22a10,10 0 0 1 0,20h-12v20h-10z M186,80v0h10a2,2 0 0 0 0,-4h-10z M204,70h30v10h-10v30h-10v-30h-10z M240,70h10l6,24l6,-24h10l-11,40h-10z" />
+    <path android:fillColor="#2EC4B6" android:pathData="M160,120h30v6h-30z M196,120h30v6h-30z M232,120h40v6h-40z" />
+</vector>

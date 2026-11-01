@@ -1,0 +1,121 @@
+name: Build IPTV Box APK
+
+on:
+  push:
+    paths:
+      - "android/IPTVBox/**"
+      - ".github/workflows/android-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: iptvbox-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test, build and publish APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android/IPTVBox
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare signing key
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.IPTVBOX_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.IPTVBOX_KEYSTORE_PASSWORD }}
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/keys"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keys/release.jks"
+            echo "IPTVBOX_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+            echo "Using the signing key from repository secrets."
+          else
+            PASS=$(openssl rand -hex 12)
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/keys/release.jks" -storepass "$PASS" -keypass "$PASS" \
+              -alias iptvbox -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=IPTV Box, OU=Personal, O=Mypro, C=SA" >/dev/null
+            echo "IPTVBOX_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "$PASS" > "$RUNNER_TEMP/keys/keystore-password.txt"
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No IPTVBOX_KEYSTORE_BASE64 secret found - a fresh signing key was generated for this build. Download the 'signing-key' artifact and store it as secrets IPTVBOX_KEYSTORE_BASE64 (base64 of release.jks) and IPTVBOX_KEYSTORE_PASSWORD so future builds install as updates."
+          fi
+          echo "IPTVBOX_KEYSTORE=$RUNNER_TEMP/keys/release.jks" >> "$GITHUB_ENV"
+          echo "IPTVBOX_KEY_ALIAS=iptvbox" >> "$GITHUB_ENV"
+          echo "IPTVBOX_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: Unit tests (core)
+        run: ./gradlew :core:test --no-daemon --stacktrace
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Collect artifacts
+        id: collect
+        run: |
+          set -e
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          VERSION=$(grep -oP 'val appVersionName = "\K[^"]+' app/build.gradle.kts)
+          OUT="IPTVBox-v${VERSION}-build${{ github.run_number }}.apk"
+          mkdir -p dist && cp "$APK" "dist/$OUT"
+          sha256sum "dist/$OUT" | tee "dist/$OUT.sha256"
+          echo "apk=android/IPTVBox/dist/$OUT" >> "$GITHUB_OUTPUT"
+          echo "sha=android/IPTVBox/dist/$OUT.sha256" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}-build${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: IPTVBox-apk
+          path: |
+            ${{ steps.collect.outputs.apk }}
+            ${{ steps.collect.outputs.sha }}
+          if-no-files-found: error
+
+      - name: Upload generated signing key (only when no secret was configured)
+        if: steps.signing.outputs.generated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-key
+          path: |
+            ${{ runner.temp }}/keys/release.jks
+            ${{ runner.temp }}/keys/keystore-password.txt
+          retention-days: 30
+
+      - name: Unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-test-report
+          path: android/IPTVBox/core/build/reports/tests/test
+          if-no-files-found: ignore
+
+      - name: Publish GitHub release with the APK
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.collect.outputs.tag }}
+          name: IPTV Box ${{ steps.collect.outputs.version }} (build ${{ github.run_number }})
+          target_commitish: ${{ github.sha }}
+          body: |
+            Android APK built from `${{ github.ref_name }}` @ ${{ github.sha }}.
+
+            Install: download the `.apk` below onto the phone / TV box (USB stick, Downloader app, or a link), allow "unknown sources" for the installer, open it.
+            SHA-256 is in the `.sha256` file.
+          files: |
+            ${{ steps.collect.outputs.apk }}
+            ${{ steps.collect.outputs.sha }}

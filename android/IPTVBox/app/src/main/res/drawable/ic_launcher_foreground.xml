@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- TV outline -->
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M24,30h60a6,6 0 0 1 6,6v34a6,6 0 0 1 -6,6H24a6,6 0 0 1 -6,-6V36a6,6 0 0 1 6,-6zM26,36v34h56V36z" />
+    <!-- Stand -->
+    <path android:fillColor="#FFFFFF" android:pathData="M40,80h28v4H40z" />
+    <!-- Play triangle -->
+    <path android:fillColor="#2EC4B6" android:pathData="M46,43l20,10l-20,10z" />
+    <!-- Signal waves -->
+    <path android:fillColor="#2EC4B6" android:pathData="M70,22a4,4 0 0 1 4,-4a16,16 0 0 1 16,16a4,4 0 0 1 -4,4a4,4 0 0 1 -4,-4a8,8 0 0 0 -8,-8a4,4 0 0 1 -4,-4z" />
+</vector>
