@@ -49,6 +49,7 @@ import com.mypro.iptvbox.core.model.Programme
 import com.mypro.iptvbox.core.sync.MediaRef
 import com.mypro.iptvbox.core.sync.WatchLink
 import com.mypro.iptvbox.core.util.TextUtil
+import com.mypro.iptvbox.data.QualityCap
 import com.mypro.iptvbox.ui.FocusableRow
 import com.mypro.iptvbox.util.QrCode
 import com.mypro.iptvbox.watch.WatchSession
@@ -261,10 +262,12 @@ private fun SidePanel(alignEnd: Boolean, width: Int, onDismiss: () -> Unit, cont
 
 @Composable
 private fun ChannelListPanel(ui: PlayerUiState, actions: PlayerActions) {
-    val groups = remember { actions.groups() }
+    val settingsState by IptvApp.settings.state.collectAsState()
+    val groups = remember(settingsState.groupMode) { actions.groups() }
     var groupIndex by remember { mutableIntStateOf(groups.indexOf(ui.groupName).takeIf { it >= 0 } ?: 0) }
-    val group = groups[groupIndex]
-    val channels = remember(group) { actions.channelsInGroup(group) }
+    LaunchedEffect(groups) { if (groupIndex >= groups.size) groupIndex = 0 }
+    val group = groups[groupIndex.coerceIn(0, groups.size - 1)]
+    val channels = remember(group, settingsState.groupMode, settingsState.sortMode) { actions.channelsInGroup(group) }
     val epg by IptvApp.repo.epg.collectAsState()
     val listState = rememberLazyListState()
     val focusRequester = remember { FocusRequester() }
@@ -292,7 +295,14 @@ private fun ChannelListPanel(ui: PlayerUiState, actions: PlayerActions) {
             Text(group, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             IconButton(onClick = { groupIndex = (groupIndex + 1) % groups.size }, modifier = Modifier.touchOnly()) { Icon(Icons.Default.ChevronRight, "Next group") }
         }
-        Text("${channels.size} channels · ◀ ▶ switch group", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 6.dp))
+        Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("${channels.size} channels · ◀ ▶ switch group", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+            FocusableRow(onClick = { actions.cycleGroupMode(); groupIndex = 0 }, modifier = Modifier.width(IntrinsicSize.Max), padding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                Icon(Icons.Default.Public, null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                Spacer(Modifier.width(4.dp))
+                Text(actions.groupModeLabel(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+        }
         if (channels.isEmpty()) {
             Text("No channels in this group", Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -388,7 +398,8 @@ private fun EpgPanel(channel: Channel, actions: PlayerActions, onDismiss: () -> 
 
 @Composable
 private fun MenuPanel(ui: PlayerUiState, actions: PlayerActions, watch: WatchSession.State) {
-    var sub by remember { mutableStateOf<String?>(null) }
+    var sub by remember { mutableStateOf(ui.menuInitialSub) }
+    LaunchedEffect(Unit) { ui.menuInitialSub = null }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(sub) { runCatching { focusRequester.requestFocus() } }
     SidePanel(alignEnd = true, width = 420, onDismiss = { if (sub != null) sub = null else ui.menu = false }) {
@@ -409,6 +420,7 @@ private fun MenuPanel(ui: PlayerUiState, actions: PlayerActions, watch: WatchSes
                             actions.setResizeMode(order[(order.indexOf(ui.resizeMode) + 1) % order.size])
                         }
                     }
+                    item { MenuItem(Icons.Default.HighQuality, "Video quality: ${ui.quality}") { sub = "Video quality" } }
                     item { MenuItem(Icons.Default.Audiotrack, "Audio track") { sub = "Audio track" } }
                     item { MenuItem(Icons.Default.Subtitles, "Subtitles") { sub = "Subtitles" } }
                     if (!ui.isLive) item { MenuItem(Icons.Default.Speed, "Playback speed: ${ui.speed}×") { sub = "Playback speed" } }
@@ -423,6 +435,21 @@ private fun MenuPanel(ui: PlayerUiState, actions: PlayerActions, watch: WatchSes
                     item { MenuItem(Icons.Default.OpenInNew, "Open in another player") { actions.openExternal(); ui.menu = false } }
                     if (ui.videoInfo.isNotBlank()) item { MenuItem(Icons.Default.Info, ui.videoInfo) {} }
                     item { MenuItem(Icons.Default.Close, "Stop and exit") { actions.exit() } }
+                }
+                "Video quality" -> {
+                    val tracks = actions.videoTracks()
+                    item { Text("Preset", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp)) }
+                    itemsIndexed(QualityCap.entries) { i, cap ->
+                        MenuItem(if (ui.quality == cap.label) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked, cap.label, if (i == 0) Modifier.focusRequester(focusRequester) else Modifier) { actions.setQualityCap(cap); sub = null }
+                    }
+                    if (tracks.size > 1) {
+                        item { Text("Streams offered by this channel", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 4.dp)) }
+                        items(tracks.sortedByDescending { it.group.getTrackFormat(it.index).height }) { t ->
+                            MenuItem(if (ui.quality == t.label) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked, t.label) { actions.selectVideoTrack(t); sub = null }
+                        }
+                    } else {
+                        item { Text(if (tracks.isEmpty()) "No video track information yet." else "This stream has a single quality; presets apply to streams that offer several.", Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    }
                 }
                 "Audio track" -> {
                     val tracks = actions.audioTracks()

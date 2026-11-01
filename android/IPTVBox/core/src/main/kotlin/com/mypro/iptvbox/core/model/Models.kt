@@ -49,6 +49,10 @@ data class Channel(
     val headers: String = "",
     /** Hints for the player: Xtream container extension etc. */
     val extension: String = "",
+    /** ISO country code or name from tvg-country (optional). */
+    val country: String = "",
+    /** Language from tvg-language (optional). */
+    val language: String = "",
 )
 
 @Serializable

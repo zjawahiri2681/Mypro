@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val appVersionName = "1.0.0"
+val appVersionName = "1.1.0"
 val appVersionCode = (System.getenv("IPTVBOX_VERSION_CODE") ?: "1").toInt()
 
 // Release signing: provide a keystore through environment variables (CI) or a

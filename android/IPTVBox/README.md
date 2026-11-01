@@ -31,6 +31,14 @@ Kotlin, Jetpack Compose and AndroidX Media3 (ExoPlayer).
 - Works for streams, URLs and local video files (each side picks the same file). Anyone can play, pause
   or seek; followers stay within ~0.25 s via speed nudging and re-seek on larger drift.
 
+**Looks and sorting**
+- Seven colour themes (Ocean, Sunset, Royal, Emerald, Crimson, Gold, Midnight/OLED) under Settings → Appearance.
+- Channels can be grouped by the provider's groups, by detected **country** (flag + name) or by **language**;
+  detection uses `tvg-country` / `tvg-language`, the XMLTV id suffix and the prefixes in channel/group names
+  ("UK:", "|AR|", "KSA -"). Sort by channel number or A–Z. The same grouping is used in the player's channel list.
+- Video quality: Auto, caps (1080p/720p/480p/360p), Lowest (data saver), or pick one of the variants an
+  HLS/DASH stream offers. Default in Settings, per-stream from the player menu or the yellow remote button.
+
 **Open anything**
 - *Open URL / file* plays any HTTP(S)/RTSP/UDP stream or local file; the app registers as a video
   player so browsers, file managers and messaging apps can hand media to it.

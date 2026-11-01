@@ -44,7 +44,9 @@ import com.mypro.iptvbox.core.model.Programme
 import com.mypro.iptvbox.core.net.Http
 import com.mypro.iptvbox.core.sync.MediaRef
 import com.mypro.iptvbox.core.sync.WatchLink
+import com.mypro.iptvbox.core.util.ChannelOrganizer
 import com.mypro.iptvbox.data.DecoderMode
+import com.mypro.iptvbox.data.QualityCap
 import com.mypro.iptvbox.ui.IptvTheme
 import com.mypro.iptvbox.util.Files
 import com.mypro.iptvbox.util.Net
@@ -125,6 +127,7 @@ class PlayerActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
         player = buildPlayer()
+        applyInitialQuality()
         WatchSession.attachPlayer(player)
         WatchSession.onEvent = { showToast(it) }
         WatchSession.onLoadRequested = { url, name ->
@@ -152,7 +155,14 @@ class PlayerActivity : ComponentActivity() {
             TYPE_CHANNEL -> {
                 val id = intent.getStringExtra(EXTRA_CHANNEL_ID) ?: return
                 val channel = repo.channelById(id) ?: run { ui.error = "Channel not found"; return }
-                setZapList(intent.getStringExtra(EXTRA_GROUP) ?: channel.group)
+                val requested = intent.getStringExtra(EXTRA_GROUP)
+                val all = repo.content.value?.channels ?: emptyList()
+                val key = when {
+                    requested == "Favourites" || requested == "All channels" -> requested ?: ""
+                    requested != null && ChannelOrganizer.of(all).groups(settings.current.groupMode).any { it.key == requested } -> requested
+                    else -> ChannelOrganizer.of(all).keyOf(channel, settings.current.groupMode)
+                }
+                setZapList(key)
                 startChannel(channel)
             }
             TYPE_URL -> {
@@ -180,14 +190,20 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun setZapList(group: String) {
+    private fun channelsFor(group: String): List<Channel> {
         val all = repo.content.value?.channels ?: emptyList()
-        zapList = when (group) {
-            "Favourites" -> { val f = repo.favorites.value; all.filter { it.id in f } }
-            "All channels", "" -> all
-            else -> all.filter { it.group == group }.ifEmpty { all }
+        val s = settings.current
+        return when (group) {
+            "Favourites" -> { val f = repo.favorites.value; ChannelOrganizer.sort(all.filter { it.id in f }, s.sortMode) }
+            "All channels", "" -> ChannelOrganizer.sort(all, s.sortMode)
+            else -> ChannelOrganizer.of(all).channelsIn(s.groupMode, group, s.sortMode)
         }
-        ui.groupName = group.ifBlank { "All channels" }
+    }
+
+    private fun setZapList(group: String) {
+        val list = channelsFor(group)
+        zapList = list.ifEmpty { channelsFor("All channels") }
+        ui.groupName = if (list.isEmpty()) "All channels" else group.ifBlank { "All channels" }
     }
 
     private fun startChannel(channel: Channel) {
@@ -330,6 +346,12 @@ class PlayerActivity : ComponentActivity() {
         return p
     }
 
+    private fun applyInitialQuality() {
+        val cap = settings.current.qualityCap
+        applyQualityCap(cap)
+        ui.quality = cap.label
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             ui.buffering = playbackState == Player.STATE_BUFFERING
@@ -407,13 +429,27 @@ class PlayerActivity : ComponentActivity() {
         override fun seekTo(ms: Long) { player.seekTo(ms) }
         override fun zap(delta: Int) = this@PlayerActivity.zap(delta)
         override fun selectChannel(channel: Channel, group: String) { setZapList(group); startChannel(channel) }
-        override fun channelsInGroup(group: String): List<Channel> {
-            val all = repo.content.value?.channels ?: emptyList()
-            return when (group) { "Favourites" -> { val f = repo.favorites.value; all.filter { it.id in f } }; "All channels" -> all; else -> all.filter { it.group == group } }
-        }
+        override fun channelsInGroup(group: String): List<Channel> = channelsFor(group)
         override fun groups(): List<String> {
             val all = repo.content.value?.channels ?: emptyList()
-            return listOf("All channels", "Favourites") + all.map { it.group.ifBlank { "Other" } }.distinct()
+            return listOf("All channels", "Favourites") + ChannelOrganizer.of(all).groups(settings.current.groupMode).map { it.key }
+        }
+        override fun groupModeLabel(): String = settings.current.groupMode.label
+        override fun cycleGroupMode() {
+            settings.update { it.copy(groupMode = com.mypro.iptvbox.core.util.GroupMode.entries[(it.groupMode.ordinal + 1) % com.mypro.iptvbox.core.util.GroupMode.entries.size]) }
+        }
+        override fun videoTracks(): List<TrackOption> = tracksOf(C.TRACK_TYPE_VIDEO)
+        override fun qualityLabel(): String = ui.quality
+        override fun setQualityCap(cap: QualityCap) {
+            applyQualityCap(cap)
+            ui.quality = cap.label
+            if (cap == QualityCap.AUTO || cap == QualityCap.LOWEST) settings.update { it.copy(qualityCap = cap) }
+        }
+        override fun selectVideoTrack(option: TrackOption) {
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setForceLowestBitrate(false).setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                .setOverrideForType(TrackSelectionOverride(option.group.mediaTrackGroup, option.index)).build()
+            ui.quality = option.label
         }
         override fun programmes(channel: Channel): List<Programme> {
             val t = System.currentTimeMillis()
@@ -474,6 +510,16 @@ class PlayerActivity : ComponentActivity() {
         override fun onNumberKey(digit: Char) = appendNumber(digit)
     }
 
+    private fun applyQualityCap(cap: QualityCap) {
+        val b = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        when {
+            cap == QualityCap.LOWEST -> b.setForceLowestBitrate(true).setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+            cap.maxHeight > 0 -> b.setForceLowestBitrate(false).setMaxVideoSize(Int.MAX_VALUE, cap.maxHeight)
+            else -> b.setForceLowestBitrate(false).setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+        }
+        player.trackSelectionParameters = b.build()
+    }
+
     private fun tracksOf(type: Int): List<TrackOption> {
         val out = ArrayList<TrackOption>()
         for (group in player.currentTracks.groups) {
@@ -481,8 +527,17 @@ class PlayerActivity : ComponentActivity() {
             for (i in 0 until group.length) {
                 if (!group.isTrackSupported(i)) continue
                 val f = group.getTrackFormat(i)
-                val label = listOfNotNull(f.label, f.language?.let { java.util.Locale(it).displayLanguage }, f.codecs?.substringBefore('.')?.uppercase(), if (f.channelCount > 0) "${f.channelCount}ch" else null)
-                    .distinct().joinToString(" · ").ifBlank { "Track ${out.size + 1}" }
+                val label = if (type == C.TRACK_TYPE_VIDEO) {
+                    listOfNotNull(
+                        if (f.height > 0) "${f.height}p" else null,
+                        if (f.width > 0 && f.height > 0) "${f.width}×${f.height}" else null,
+                        if (f.bitrate > 0) String.format(java.util.Locale.US, "%.1f Mbps", f.bitrate / 1_000_000f) else null,
+                        if (f.frameRate > 0) "${f.frameRate.toInt()} fps" else null,
+                    ).joinToString(" · ").ifBlank { "Variant ${out.size + 1}" }
+                } else {
+                    listOfNotNull(f.label, f.language?.let { java.util.Locale(it).displayLanguage }, f.codecs?.substringBefore('.')?.uppercase(), if (f.channelCount > 0) "${f.channelCount}ch" else null)
+                        .distinct().joinToString(" · ").ifBlank { "Track ${out.size + 1}" }
+                }
                 out += TrackOption(type, group, i, label, group.isTrackSelected(i))
             }
         }
@@ -525,6 +580,7 @@ class PlayerActivity : ComponentActivity() {
                 KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_SETTINGS -> { if (!ui.anyPanel) { ui.menu = true; return true } }
                 KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_PROG_RED -> { if (!ui.anyPanel && ui.channel != null) { ui.epgPanel = true; return true } }
                 KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_PROG_GREEN -> { ui.overlay = !ui.overlay; return true }
+                KeyEvent.KEYCODE_PROG_YELLOW -> { if (!ui.anyPanel) { ui.menuInitialSub = "Video quality"; ui.menu = true; return true } }
             }
             if (event.keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 && !ui.anyPanel && zapList.isNotEmpty()) {
                 appendNumber('0' + (event.keyCode - KeyEvent.KEYCODE_0)); return true
@@ -633,4 +689,10 @@ interface PlayerActions {
     fun copyText(text: String)
     fun openExternal()
     fun onNumberKey(digit: Char)
+    fun groupModeLabel(): String
+    fun cycleGroupMode()
+    fun videoTracks(): List<TrackOption>
+    fun qualityLabel(): String
+    fun setQualityCap(cap: QualityCap)
+    fun selectVideoTrack(option: TrackOption)
 }

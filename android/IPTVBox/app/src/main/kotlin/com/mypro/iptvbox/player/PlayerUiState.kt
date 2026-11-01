@@ -41,6 +41,9 @@ class PlayerUiState {
     var nowProgramme by mutableStateOf<Programme?>(null)
     var nextProgramme by mutableStateOf<Programme?>(null)
     var isFavorite by mutableStateOf(false)
+    var quality by mutableStateOf("Auto")
+    /** Submenu to open when the options panel appears (e.g. from the yellow button). */
+    var menuInitialSub by mutableStateOf<String?>(null)
 
     val anyPanel: Boolean get() = channelList || epgPanel || menu || watchDialog != null || hostPicker || error != null
 }

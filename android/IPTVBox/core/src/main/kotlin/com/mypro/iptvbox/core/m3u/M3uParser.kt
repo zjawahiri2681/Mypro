@@ -83,6 +83,8 @@ object M3uParser {
                         catchupSource = catchupSource,
                         headers = headers,
                         extension = url.substringAfterLast('.', "").take(5),
+                        country = attrs["tvg-country"] ?: "",
+                        language = attrs["tvg-language"] ?: "",
                     )
                 }
                 ContentType.MOVIE -> movies += VodItem(

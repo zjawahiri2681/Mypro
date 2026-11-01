@@ -43,7 +43,7 @@ fun HomeScreen(pendingLink: WatchLink?, onLinkConsumed: () -> Unit) {
     LaunchedEffect(pendingLink) { if (pendingLink != null) section = Section.WATCH }
     LaunchedEffect(playlists.isEmpty()) { if (playlists.isEmpty() && section in setOf(Section.LIVE, Section.MOVIES, Section.SERIES)) section = Section.PLAYLISTS }
 
-    Row(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Row(Modifier.fillMaxSize().background(appBackgroundBrush())) {
         NavRail(section) { section = it }
         Column(Modifier.weight(1f).fillMaxHeight()) {
             if (loadState.loading) {
@@ -90,13 +90,16 @@ private fun NavRail(current: Section, onSelect: (Section) -> Unit) {
     val settings by IptvApp.settings.state.collectAsState()
     val active = playlists.firstOrNull { it.id == settings.activePlaylistId }
     Column(
-        Modifier.width(220.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface).padding(12.dp),
+        Modifier.width(220.dp).fillMaxHeight().background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f)).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(Modifier.padding(start = 8.dp, top = 8.dp, bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.ConnectedTv, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 16.dp).background(accentBrush(), MaterialTheme.shapes.medium).padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.ConnectedTv, null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(28.dp))
             Spacer(Modifier.width(10.dp))
-            Text("IPTV Box", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("IPTV Box", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
         }
         for (s in Section.entries) {
             FocusableRow(onClick = { onSelect(s) }, selected = s == current) {
