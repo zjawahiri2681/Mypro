@@ -114,13 +114,28 @@ fun InviteScreen(app: FamilyTalkApp, nav: Nav) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 QrImage(inv.encode(), 280.dp)
                 Text("Together: on their phone open FamilyTalk › Join with invite QR and scan this.", textAlign = TextAlign.Center)
+                Button({
+                    val text = com.mypro.familytalk.core.family.Invite.shareMessage(inv)
+                    // WhatsApp, then WhatsApp Business; otherwise fall back to the normal share sheet.
+                    val sent = listOf("com.whatsapp", "com.whatsapp.w4b").any { pkg ->
+                        runCatching {
+                            ctx.startActivity(Intent(Intent.ACTION_SEND).setType("text/plain").setPackage(pkg).putExtra(Intent.EXTRA_TEXT, text))
+                        }.isSuccess
+                    }
+                    if (!sent) {
+                        android.widget.Toast.makeText(ctx, "WhatsApp isn't installed — choose another app", android.widget.Toast.LENGTH_SHORT).show()
+                        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Send invite by message"))
+                    }
+                }, Modifier.fillMaxWidth().height(52.dp), colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = androidx.compose.ui.graphics.Color(0xFF075E54), contentColor = androidx.compose.ui.graphics.Color.White)) {
+                    Icon(Icons.Filled.Share, null); Spacer(Modifier.size(8.dp)); Text("Share via WhatsApp")
+                }
                 OutlinedButton({
                     ctx.startActivity(Intent.createChooser(
                         Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, com.mypro.familytalk.core.family.Invite.shareMessage(inv)),
                         "Send invite by message",
                     ))
-                }, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Filled.Share, null); Spacer(Modifier.size(8.dp)); Text("Send invite by message") }
-                Text("Far away: send it by WhatsApp, SMS or e-mail. They paste the whole message into FamilyTalk.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Filled.Share, null); Spacer(Modifier.size(8.dp)); Text("Other app (SMS, e-mail…)") }
+                Text("Far away: send it by WhatsApp or another app. They copy the whole message and tap \"Paste invite message\" in FamilyTalk.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("Anyone who sees that message could ask to join, so before you tap Allow, phone them and check the digits on both screens match.",
                     fontSize = 14.sp, color = trustWarn(), textAlign = TextAlign.Center)
             }
