@@ -1,3 +1,4 @@
+// Superseded by MiniMqtt.kt (MiniMqttRelay / MultiRelay); no longer used by the app. Kept until removal is approved.
 package com.mypro.familytalk.core.relay
 
 import kotlinx.coroutines.flow.MutableStateFlow

@@ -25,7 +25,8 @@ import com.mypro.familytalk.core.protocol.ReplayGuard
 import com.mypro.familytalk.core.protocol.RosterUpdate
 import com.mypro.familytalk.core.relay.Incoming
 import com.mypro.familytalk.core.relay.Messenger
-import com.mypro.familytalk.core.relay.MqttRelay
+import com.mypro.familytalk.core.relay.MiniMqttRelay
+import com.mypro.familytalk.core.relay.MultiRelay
 import com.mypro.familytalk.core.sip.SipAccount
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +74,10 @@ class FamilyRepo(private val context: Context) {
     /** Called with (old, new) roster so the chat can record "X joined / was removed". */
     var onRosterChanged: (Roster?, Roster) -> Unit = { _, _ -> }
     var onJoinRequested: (String) -> Unit = {}
-    private var relay: MqttRelay? = null
+    private var relay: MultiRelay? = null
+
+    /** Which relays this phone currently reaches, e.g. "broker.hivemq.com:8883". */
+    val relayNames: String get() = relay?.connectedNames.orEmpty()
     private val guard = ReplayGuard().also { it.restore(_data.value.replay) }
 
     val identity: IdentityKeys by lazy {
@@ -209,7 +213,7 @@ class FamilyRepo(private val context: Context) {
         val familyId = d.familyId ?: roster.value?.familyId ?: return
         val cfg = roster.value?.relay ?: d.joinRelay ?: RelayConfig()
         messenger?.stop()
-        val r = MqttRelay(cfg.broker, d.clientId, cfg.brokerUser, cfg.brokerPassword) { Log.i(TAG, it) }
+        val r = MultiRelay(cfg.endpoints().map { url -> MiniMqttRelay(url, d.clientId, cfg.brokerUser, cfg.brokerPassword, { Log.i(TAG, it) }) })
         val m = Messenger(
             identity, { familyId }, ::trusted, r, guard, log = { Log.i(TAG, it) },
             signalNotBefore = startedAt - 5_000,

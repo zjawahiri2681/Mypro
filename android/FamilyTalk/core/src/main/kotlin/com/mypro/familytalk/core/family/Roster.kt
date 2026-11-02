@@ -36,8 +36,20 @@ data class RelayConfig(
     val brokerPassword: String? = null,
     val ice: List<IceServer> = listOf(IceServer(listOf("stun:stun.l.google.com:19302"))),
 ) {
+    /**
+     * Relays this family actually uses. With the public default, three public brokers on
+     * different ports (8883, 8884 and 443) are used together, so a network that blocks a
+     * port or has broken IPv6 still gets through. With your own server, only it is used.
+     */
+    fun endpoints(): List<String> = if (broker == DEFAULT_BROKER) PUBLIC_RELAYS else listOf(broker)
+
     companion object {
         const val DEFAULT_BROKER = "ssl://broker.hivemq.com:8883"
+        val PUBLIC_RELAYS = listOf(
+            "ssl://broker.hivemq.com:8883",
+            "wss://broker.hivemq.com:8884/mqtt",
+            "wss://mqtt.eclipseprojects.io:443/mqtt",
+        )
     }
 }
 

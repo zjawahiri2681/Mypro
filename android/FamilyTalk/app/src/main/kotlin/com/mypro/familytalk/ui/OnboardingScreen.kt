@@ -138,7 +138,7 @@ fun WaitingForAdmissionScreen(app: FamilyTalkApp) {
             val sentAt by app.family.joinSentAt.collectAsStateWithLifecycle()
             Text(
                 when {
-                    online && sentAt != null -> "● Connected to relay · request sent ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(sentAt!!))} (re-sent every 30 s)"
+                    online && sentAt != null -> "● Connected (${app.family.relayNames}) · request sent ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(sentAt!!))} (re-sent every 30 s)"
                     online -> "● Connected to relay"
                     relayErr != null -> "○ Can't reach the relay: $relayErr — check internet / VPN / firewall"
                     else -> "○ Connecting to relay…"
