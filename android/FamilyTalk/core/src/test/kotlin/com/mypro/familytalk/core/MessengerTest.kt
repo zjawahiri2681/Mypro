@@ -93,9 +93,21 @@ class MessengerTest {
         val got = mutableListOf<Incoming>()
         val start = System.currentTimeMillis()
         Messenger(b, { "fam" }, { family }, LoopbackRelay(hub), signalNotBefore = start).also { it.onIncoming = { m -> got += m }; it.start() }
-        val old = Sealed.seal(PayloadCodec.encode(CallHangup("c9")), "fam", a, b.public, nowMs = start - 30_000)
+        val old = Sealed.seal(PayloadCodec.encode(CallHangup("c9")), "fam", a, b.public, nowMs = start - 60 * 60_000)
         LoopbackRelay(hub).publish(Topics.inbox("fam", b.memberId), Sealed.sealOuter(Json.encodeToString(Wire.serializer(), Wire(old)).toByteArray(), b.public.dhKeyBytes), false)
         assertEquals(0, got.size)
+    }
+
+    @Test fun callSignallingSurvivesClockDifferences() {
+        val got = mutableListOf<Incoming>()
+        val now = System.currentTimeMillis()
+        Messenger(b, { "fam" }, { family }, LoopbackRelay(hub)).also { it.onIncoming = { m -> got += m }; it.start() }
+        // Sender clock 7 minutes behind, then 4 minutes ahead: both must still ring.
+        for ((i, skew) in listOf(-7 * 60_000L, 4 * 60_000L).withIndex()) {
+            val env = Sealed.seal(PayloadCodec.encode(CallHangup("c$i")), "fam", a, b.public, nowMs = now + skew)
+            LoopbackRelay(hub).publish(Topics.inbox("fam", b.memberId), Sealed.sealOuter(Json.encodeToString(Wire.serializer(), Wire(env)).toByteArray(), b.public.dhKeyBytes), false)
+        }
+        assertEquals(2, got.size)
     }
 
     @Test fun topicsHideIdentity() {

@@ -216,7 +216,6 @@ class FamilyRepo(private val context: Context) {
         val r = MultiRelay(cfg.endpoints().map { url -> MiniMqttRelay(url, d.clientId, cfg.brokerUser, cfg.brokerPassword, { Log.i(TAG, it) }) })
         val m = Messenger(
             identity, { familyId }, ::trusted, r, guard, log = { Log.i(TAG, it) },
-            signalNotBefore = startedAt - 5_000,
             myPrekeys = { id -> _data.value.prekeys.firstOrNull { it.id == id } },
             peerPrekey = { member -> _data.value.peerPrekeys[member] },
         )
@@ -284,7 +283,8 @@ class FamilyRepo(private val context: Context) {
             }
             else -> handlers.firstOrNull { it(msg) }
         }
-        if (Messenger.isDurable(msg.payload)) scheduleReplaySave()
+        // Persist seen message ids (debounced) so nothing can be replayed after a restart.
+        scheduleReplaySave()
     }
 
     private fun onRoster(update: RosterUpdate) {

@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val appVersionName = "0.2.2"
+val appVersionName = "0.2.3"
 val appVersionCode = (System.getenv("FAMILYTALK_VERSION_CODE") ?: "1").toInt()
 
 val keystoreProps = Properties().apply {

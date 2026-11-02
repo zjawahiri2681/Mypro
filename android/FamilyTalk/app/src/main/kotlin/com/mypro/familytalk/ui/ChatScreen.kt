@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -31,6 +33,8 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -78,6 +82,7 @@ fun ChatScreen(app: FamilyTalkApp, nav: Nav, conv: String) {
     val member = roster?.byId(conv)
     val title = if (conv == FAMILY_CONV) "Family group" else member?.name ?: "Former member"
     var text by rememberSaveable { mutableStateOf("") }
+    var emojiOpen by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
@@ -137,7 +142,11 @@ fun ChatScreen(app: FamilyTalkApp, nav: Nav, conv: String) {
                     }
                 }
             }
+            if (emojiOpen) EmojiPanel { e -> text += e }
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton({ emojiOpen = !emojiOpen }) {
+                    Icon(if (emojiOpen) Icons.Filled.Keyboard else Icons.Filled.EmojiEmotions, if (emojiOpen) "Hide emojis" else "Emojis")
+                }
                 IconButton({ pick.launch(arrayOf("*/*")) }) { Icon(Icons.Filled.AttachFile, "Send a file") }
                 OutlinedTextField(text, { text = it }, Modifier.weight(1f), placeholder = { Text("Message") }, maxLines = 5, shape = RoundedCornerShape(24.dp))
                 IconButton({ app.chats.sendText(conv, text); text = "" }, enabled = text.isNotBlank()) { Icon(Icons.AutoMirrored.Filled.Send, "Send") }
@@ -208,4 +217,33 @@ private fun openFile(ctx: android.content.Context, f: File) {
         val mime = ctx.contentResolver.getType(uri) ?: "*/*"
         ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Open with"))
     }.onFailure { Toast.makeText(ctx, "No app can open this file", Toast.LENGTH_SHORT).show() }
+}
+
+private val EmojiGroups = listOf(
+    "Smileys" to "😀 😂 🤣 😊 😍 🥰 😘 😎 🤗 🤔 😴 😢 😭 😡 😱 🥳 😇 🙃 😅 🤩",
+    "Hands" to "👍 👎 👏 🙏 🤲 👋 🤝 💪 ✌️ 👌 ☝️ 🫶",
+    "Hearts" to "❤️ 🧡 💛 💚 💙 💜 🤍 💔 💕 💯 ✨ 🔥",
+    "Family" to "👨‍👩‍👧‍👦 👶 👧 👦 👩 👨 👵 👴 🏠 🕌 🌙 ⭐",
+    "Everyday" to "☕ 🍽️ 🍰 🎂 🎁 🎉 🚗 ✈️ 📞 📷 ⏰ ✅",
+)
+
+/** Simple, always-available emoji picker (works the same on every phone and keyboard). */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun EmojiPanel(onPick: (String) -> Unit) {
+    androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 240.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(8.dp)) {
+            EmojiGroups.forEach { (title, list) ->
+                Text(title, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(start = 6.dp, top = 4.dp))
+                androidx.compose.foundation.layout.FlowRow {
+                    list.split(" ").filter { it.isNotBlank() }.forEach { e ->
+                        Box(
+                            Modifier.size(48.dp).clickable(onClickLabel = "Insert $e") { onPick(e) },
+                            contentAlignment = Alignment.Center,
+                        ) { Text(e, fontSize = 26.sp) }
+                    }
+                }
+            }
+        }
+    }
 }

@@ -77,6 +77,12 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     private val gone = mutableSetOf<String>()
     private val peers = mutableMapOf<String, Peer>()
     private val earlyIce = mutableMapOf<String, MutableList<IceCandidate>>()
+    /**
+     * Messages travel over several relays at once and can overtake each other, so an SDP
+     * offer may arrive before that person's "accept". It is parked here (never acted on)
+     * until they have accepted and we are in the call.
+     */
+    private val earlySdp = mutableMapOf<String, Sdp>()
     private val peerState = mutableMapOf<String, PeerConnection.PeerConnectionState>()
     private val remoteMedia = mutableMapOf<String, MediaState>()
     private var video = false
@@ -188,8 +194,13 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
             }
             // Media is only ever negotiated with people who accepted and have not left:
             // a member who declined or hung up can never receive our microphone/camera.
-            is Sdp -> if (p.callId == session?.callId && canTalkTo(from)) onSdp(from, p)
-            is Ice -> if (p.callId == session?.callId && canTalkTo(from)) {
+            is Sdp -> if (p.callId == session?.callId && from in participants && from !in gone) {
+                if (canTalkTo(from) && session?.phase in setOf(CallPhase.CONNECTING, CallPhase.ACTIVE)) onSdp(from, p)
+                else earlySdp[from] = p
+            }
+            // Candidates are only ever applied to a peer connection, and those exist only for
+            // people who accepted; until then they wait.
+            is Ice -> if (p.callId == session?.callId && from in participants && from !in gone) {
                 val c = IceCandidate(p.mid, p.index, p.candidate)
                 peers[from]?.addIce(c) ?: earlyIce.getOrPut(from) { mutableListOf() }.add(c)
             }
@@ -231,6 +242,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         apply(session!!.start())
         publish()
         LinkService.showIncoming(context, _ui.value!!)
+        // If FamilyTalk is on screen, go straight to the full-screen ringing view.
+        if (com.mypro.familytalk.FamilyTalkApp.instance.inForeground) openCallScreen()
     }
 
     private fun onAccept(from: String, p: CallAccept) {
@@ -255,6 +268,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         if (callId != s.callId || from !in participants) return
         gone += from
         joined -= from
+        earlySdp.remove(from); earlyIce.remove(from)
         peers.remove(from)?.close()
         val others = participants.filter { it != family.myId }
         val incomingFromCaller = !s.outgoing && s.phase == CallPhase.INCOMING
@@ -307,8 +321,12 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
 
     private fun connect(peerId: String) {
         if (peerId == family.myId || peers.containsKey(peerId) || !canTalkTo(peerId)) return
+        val parked = earlySdp.remove(peerId)
         val peer = createPeer(peerId) ?: return
-        if (Mesh.shouldOffer(family.myId, peerId)) peer.offer()
+        when {
+            parked?.type == "offer" -> peer.onRemoteSdp(parked.type, parked.sdp)
+            Mesh.shouldOffer(family.myId, peerId) -> peer.offer()
+        }
     }
 
     private fun createPeer(peerId: String): Peer? {
@@ -346,7 +364,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     private fun reset(callId: String, outgoing: Boolean, withVideo: Boolean, people: List<String>) {
         session = CallSession(callId, outgoing, System.currentTimeMillis())
         participants = people; video = withVideo
-        joined.clear(); gone.clear(); peers.clear(); earlyIce.clear(); peerState.clear(); remoteMedia.clear()
+        joined.clear(); gone.clear(); peers.clear(); earlyIce.clear(); earlySdp.clear(); peerState.clear(); remoteMedia.clear()
         _ui.value = null
         ticker?.cancel(false)
         ticker = exec.scheduleWithFixedDelay({ post { session?.let { event(CallEvent.Tick(System.currentTimeMillis())) } } }, 1, 1, TimeUnit.SECONDS)

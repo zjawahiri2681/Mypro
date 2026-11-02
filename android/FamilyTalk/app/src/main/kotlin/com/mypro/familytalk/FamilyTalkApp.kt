@@ -18,9 +18,21 @@ class FamilyTalkApp : Application() {
     lateinit var sip: SipEngine; private set
     lateinit var updater: com.mypro.familytalk.update.Updater; private set
 
+    @Volatile private var visibleActivities = 0
+    val inForeground: Boolean get() = visibleActivities > 0
+
     override fun onCreate() {
         super.onCreate()
         instance = this
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityStarted(a: android.app.Activity) { visibleActivities++ }
+            override fun onActivityStopped(a: android.app.Activity) { visibleActivities = maxOf(0, visibleActivities - 1) }
+            override fun onActivityCreated(a: android.app.Activity, b: android.os.Bundle?) {}
+            override fun onActivityResumed(a: android.app.Activity) {}
+            override fun onActivityPaused(a: android.app.Activity) {}
+            override fun onActivitySaveInstanceState(a: android.app.Activity, b: android.os.Bundle) {}
+            override fun onActivityDestroyed(a: android.app.Activity) {}
+        })
         Notifications.createChannels(this)
         family = FamilyRepo(this)
         chats = ChatRepo(this, family)

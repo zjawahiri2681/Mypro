@@ -99,7 +99,7 @@ class Messenger(
         // Strangers may only ask to join; everything else requires roster membership.
         if (known == null && payload !is JoinRequest) return
         val window = if (isDurable(payload)) DURABLE_WINDOW else SIGNAL_WINDOW
-        if (!isDurable(payload) && env.ts < signalNotBefore) return
+        if (!isDurable(payload) && signalNotBefore > 0 && env.ts < signalNotBefore) return
         // Phones with a wrong clock must still be able to chat and join; signalling stays strict.
         val skew = if (isDurable(payload)) DURABLE_FUTURE_SKEW else SIGNAL_FUTURE_SKEW
         if (!guard.accept(env.from, env.id, env.ts, clock(), window, skew)) { log("dropped (time/replay) from ${env.from.take(8)}"); return }
@@ -107,17 +107,22 @@ class Messenger(
     }
 
     companion object {
-        const val SIGNAL_WINDOW = 2 * 60 * 1000L
+        /**
+         * Phones' clocks are often minutes apart (tablets especially), so the time check is
+         * only a coarse filter; real replay protection is the persisted message-id cache.
+         */
+        const val SIGNAL_WINDOW = 30 * 60 * 1000L
         const val DURABLE_WINDOW = 7 * 24 * 60 * 60 * 1000L
         const val DURABLE_FUTURE_SKEW = 24 * 60 * 60 * 1000L
-        const val SIGNAL_FUTURE_SKEW = 10 * 60 * 1000L
+        const val SIGNAL_FUTURE_SKEW = 30 * 60 * 1000L
         /**
          * Ringing, cancelling and declining are queued by the broker (QoS 1) so a phone
          * whose connection blipped still rings; stale ones are dropped by the 2-minute window.
          */
         fun queueAtBroker(p: Payload) = p is com.mypro.familytalk.core.protocol.CallInvite ||
             p is com.mypro.familytalk.core.protocol.CallHangup || p is com.mypro.familytalk.core.protocol.CallDecline ||
-            p is com.mypro.familytalk.core.protocol.CallAccept
+            p is com.mypro.familytalk.core.protocol.CallAccept || p is com.mypro.familytalk.core.protocol.Sdp ||
+            p is com.mypro.familytalk.core.protocol.Ice
 
         fun isDurable(p: Payload) = p is ChatText || p is ChatReceipt || p is FileOffer || p is FileChunk || p is RosterUpdate || p is JoinRequest ||
             p is com.mypro.familytalk.core.protocol.PrekeyAnnounce

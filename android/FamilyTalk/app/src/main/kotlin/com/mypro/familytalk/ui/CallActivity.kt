@@ -152,7 +152,10 @@ private fun FamilyCall(app: FamilyTalkApp, c: CallUi) {
         CallPhase.ACTIVE -> c.connectedAt?.let { formatDuration((now - it) / 1000) } ?: "Connected"
         CallPhase.ENDED -> "Call ended" + (friendlyReason(c.endReason)?.let { " · $it" } ?: "")
     }
-    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
+    val fullScreen = c.video && c.peers.size == 1 && c.phase in setOf(CallPhase.CONNECTING, CallPhase.ACTIVE)
+    if (fullScreen) {
+        FullScreenVideo(app, c, status) { addPicker = true }
+    } else Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp)) {
         // Header: who, status, encryption state
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             Text(c.title, color = Color.White, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
@@ -180,7 +183,7 @@ private fun FamilyCall(app: FamilyTalkApp, c: CallUi) {
                     }
                 }
                 app.calls.rtc.videoTrack?.takeIf { c.camera }?.let { local ->
-                    Box(Modifier.align(Alignment.BottomEnd).size(110.dp, 160.dp).clip(RoundedCornerShape(12.dp))) { VideoView(app, local, mirror = app.calls.rtc.frontCamera) }
+                    Box(Modifier.align(Alignment.BottomEnd).size(110.dp, 160.dp).clip(RoundedCornerShape(12.dp))) { VideoView(app, local, mirror = app.calls.rtc.frontCamera, overlay = true) }
                 }
             } else {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -193,28 +196,7 @@ private fun FamilyCall(app: FamilyTalkApp, c: CallUi) {
             }
         }
         Spacer(Modifier.height(16.dp))
-        // Controls
-        if (c.phase == CallPhase.INCOMING) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                LabeledAction(Icons.Filled.CallEnd, "Decline", Brand.Decline) { app.calls.decline() }
-                LabeledAction(if (c.video) Icons.Filled.Videocam else Icons.Filled.Call, "Accept", Brand.Accept) { app.calls.accept() }
-            }
-        } else if (c.phase != CallPhase.ENDED) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                // A white (filled) button always means "this toggle is switched ON".
-                Toggle(Icons.Filled.MicOff, "Mute", on = !c.mic) { app.calls.toggleMic() }
-                Toggle(Icons.AutoMirrored.Filled.VolumeUp, "Speaker", on = c.speaker) { app.calls.toggleSpeaker() }
-                if (c.video) {
-                    Toggle(Icons.Filled.VideocamOff, "Camera off", on = !c.camera) { app.calls.toggleCamera() }
-                    LabeledAction(Icons.Filled.Cameraswitch, "Flip", IdleFill, small = true) { app.calls.switchCamera() }
-                }
-                if (!c.echoTest && c.canAdd) LabeledAction(Icons.Filled.PersonAdd, "Add", IdleFill, small = true) { addPicker = true }
-            }
-            Spacer(Modifier.height(20.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                LabeledAction(Icons.Filled.CallEnd, "End", Brand.Decline) { app.calls.hangup() }
-            }
-        }
+        CallControls(app, c) { addPicker = true }
     }
     if (addPicker) {
         val roster = app.family.roster.value
@@ -283,6 +265,80 @@ private fun SipCalls(app: FamilyTalkApp, s: SipUi) {
     }
 }
 
+
+@Composable
+private fun CallControls(app: FamilyTalkApp, c: CallUi, onAdd: () -> Unit) {
+    if (c.phase == CallPhase.INCOMING) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            LabeledAction(Icons.Filled.CallEnd, "Decline", Brand.Decline) { app.calls.decline() }
+            LabeledAction(if (c.video) Icons.Filled.Videocam else Icons.Filled.Call, "Accept", Brand.Accept) { app.calls.accept() }
+        }
+    } else if (c.phase != CallPhase.ENDED) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            // A white (filled) button always means "this toggle is switched ON".
+            Toggle(Icons.Filled.MicOff, "Mute", on = !c.mic) { app.calls.toggleMic() }
+            Toggle(Icons.AutoMirrored.Filled.VolumeUp, "Speaker", on = c.speaker) { app.calls.toggleSpeaker() }
+            if (c.video) {
+                Toggle(Icons.Filled.VideocamOff, "Camera off", on = !c.camera) { app.calls.toggleCamera() }
+                LabeledAction(Icons.Filled.Cameraswitch, "Flip", IdleFill, small = true) { app.calls.switchCamera() }
+            }
+            if (!c.echoTest && c.canAdd) LabeledAction(Icons.Filled.PersonAdd, "Add", IdleFill, small = true) { onAdd() }
+        }
+        Spacer(Modifier.height(20.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            LabeledAction(Icons.Filled.CallEnd, "End", Brand.Decline) { app.calls.hangup() }
+        }
+    }
+}
+
+/**
+ * One-to-one video: the other person fills the whole screen, your camera is a small
+ * window in the corner, and the controls fade away after a few seconds (tap to show).
+ */
+@Composable
+private fun FullScreenVideo(app: FamilyTalkApp, c: CallUi, status: String, onAdd: () -> Unit) {
+    val p = c.peers.first()
+    var controls by remember { mutableStateOf(true) }
+    LaunchedEffect(controls, c.phase) {
+        if (controls && c.phase == CallPhase.ACTIVE) { delay(5000); controls = false }
+    }
+    Box(
+        Modifier.fillMaxSize().background(Color.Black)
+            .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { controls = !controls },
+    ) {
+        if (p.video != null && p.camOn) VideoView(app, p.video, mirror = false)
+        else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Avatar(p.name, p.color, 140.dp) }
+
+        app.calls.rtc.videoTrack?.takeIf { c.camera }?.let { local ->
+            Box(
+                Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(12.dp).size(100.dp, 150.dp)
+                    .clip(RoundedCornerShape(14.dp)).border(1.dp, Color(0x66FFFFFF), RoundedCornerShape(14.dp)),
+            ) { VideoView(app, local, mirror = app.calls.rtc.frontCamera, overlay = true) }
+        }
+
+        if (controls) {
+            Column(
+                Modifier.align(Alignment.TopStart).fillMaxWidth()
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent)))
+                    .safeDrawingPadding().padding(16.dp),
+            ) {
+                Text(p.name, color = Color.White, style = MaterialTheme.typography.titleLarge)
+                Text(status + if (!p.micOn) " · they are muted" else "", color = Color.White.copy(alpha = 0.9f))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Lock, null, tint = Brand.TealLight, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("End-to-end encrypted", color = Brand.TealLight, fontSize = 13.sp)
+                }
+            }
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000))))
+                    .safeDrawingPadding().padding(16.dp),
+            ) { CallControls(app, c, onAdd) }
+        }
+    }
+}
+
 private val IdleFill = Color.White.copy(alpha = 0.28f)
 
 private fun friendlyReason(r: String?): String? = when (r) {
@@ -328,7 +384,7 @@ private fun LabeledAction(icon: androidx.compose.ui.graphics.vector.ImageVector,
 }
 
 @Composable
-private fun VideoView(app: FamilyTalkApp, track: VideoTrack, mirror: Boolean) {
+private fun VideoView(app: FamilyTalkApp, track: VideoTrack, mirror: Boolean, overlay: Boolean = false) {
     val egl = app.calls.rtc.egl
     var renderer by remember { mutableStateOf<SurfaceViewRenderer?>(null) }
     AndroidView(
@@ -338,6 +394,8 @@ private fun VideoView(app: FamilyTalkApp, track: VideoTrack, mirror: Boolean) {
                 init(egl.eglBaseContext, null)
                 setScalingType(RendererCommon.ScalingType.SCALE_ASPECT_FILL)
                 setEnableHardwareScaler(true)
+                // The small self-view must be drawn above the full-screen remote video.
+                if (overlay) setZOrderMediaOverlay(true)
                 renderer = this
             }
         },
