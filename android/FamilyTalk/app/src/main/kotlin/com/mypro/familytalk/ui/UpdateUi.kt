@@ -78,3 +78,26 @@ fun UpdateSettings(app: FamilyTalkApp) {
         }
     }
 }
+
+/** Version line + "Check for updates" for screens before joining a family (no Settings yet). */
+@Composable
+fun CompactUpdate(app: FamilyTalkApp) {
+    val st by app.updater.state.collectAsStateWithLifecycle()
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+        Text("FamilyTalk ${app.updater.currentVersion} (build ${app.updater.currentBuild})", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        when (val s = st) {
+            UpdateState.Checking -> Text("Checking for updates…")
+            UpdateState.UpToDate -> Text("You have the latest version.", color = trustOk())
+            is UpdateState.Available -> Text("Version ${s.info.version} (build ${s.info.build}) is available.")
+            is UpdateState.Downloading -> LinearProgressIndicator({ s.progress }, Modifier.fillMaxWidth().padding(vertical = 6.dp))
+            is UpdateState.Failed -> Text(s.message, color = MaterialTheme.colorScheme.error)
+            else -> {}
+        }
+        when (val s = st) {
+            is UpdateState.Ready -> Button({ app.updater.install() }) { Text("Install update") }
+            is UpdateState.Available -> OutlinedButton({ app.updater.download(s.info) }) { Text("Download update") }
+            is UpdateState.Downloading, UpdateState.Checking, UpdateState.Installing -> {}
+            else -> androidx.compose.material3.TextButton({ app.updater.check(download = true) }) { Text("Check for updates") }
+        }
+    }
+}

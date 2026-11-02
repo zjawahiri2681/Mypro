@@ -56,6 +56,7 @@ fun OnboardingScreen(app: FamilyTalkApp, removed: Boolean) {
             Modifier.safeDrawingPadding().verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            UpdateBanner(app)
             Spacer(Modifier.height(24.dp))
             Icon(Icons.Filled.Shield, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(56.dp))
             Text("FamilyTalk", style = MaterialTheme.typography.headlineMedium)
@@ -115,6 +116,7 @@ fun OnboardingScreen(app: FamilyTalkApp, removed: Boolean) {
                 }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            CompactUpdate(app)
         }
     }
 }
@@ -125,6 +127,7 @@ fun scanOptions(): ScanOptions = ScanOptions().setDesiredBarcodeFormats(ScanOpti
 fun WaitingForAdmissionScreen(app: FamilyTalkApp) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.safeDrawingPadding().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically)) {
+            UpdateBanner(app)
             CircularProgressIndicator()
             var waited by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
             androidx.compose.runtime.LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(1000); waited++ } }
@@ -155,6 +158,7 @@ fun WaitingForAdmissionScreen(app: FamilyTalkApp) {
                 )
             }
             Row { TextButton({ app.family.leaveAndWipe() }) { Text("Cancel and start over") } }
+            CompactUpdate(app)
         }
     }
 }
