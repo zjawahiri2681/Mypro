@@ -1,0 +1,122 @@
+name: Build Meeting Minutes APK
+
+on:
+  push:
+    paths:
+      - "android/MeetingMinutes/**"
+      - ".github/workflows/meeting-minutes-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: minutes-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test, build and publish APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android/MeetingMinutes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Prepare signing key
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MINUTES_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MINUTES_KEYSTORE_PASSWORD }}
+        run: |
+          set -e
+          mkdir -p "$RUNNER_TEMP/keys"
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keys/release.jks"
+            echo "MINUTES_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+          else
+            PASS=$(openssl rand -hex 12)
+            keytool -genkeypair -keystore "$RUNNER_TEMP/keys/release.jks" -storepass "$PASS" -keypass "$PASS" \
+              -alias minutes -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Meeting Minutes, OU=Personal, O=Mypro, C=SA" >/dev/null
+            echo "MINUTES_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            echo "$PASS" > "$RUNNER_TEMP/keys/keystore-password.txt"
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::No MINUTES_KEYSTORE_BASE64 secret - a fresh signing key was generated. Download the 'minutes-signing-key' artifact and store it as secrets MINUTES_KEYSTORE_BASE64 (base64 of release.jks) and MINUTES_KEYSTORE_PASSWORD so later builds install as updates."
+          fi
+          echo "MINUTES_KEYSTORE=$RUNNER_TEMP/keys/release.jks" >> "$GITHUB_ENV"
+          echo "MINUTES_KEY_ALIAS=minutes" >> "$GITHUB_ENV"
+          echo "MINUTES_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      - name: Unit tests (core)
+        run: ./gradlew :core:test --no-daemon --stacktrace
+
+      - name: Build release APK
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Collect artifacts
+        id: collect
+        run: |
+          set -e
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          VERSION=$(grep -oP 'val appVersionName = "\K[^"]+' app/build.gradle.kts)
+          OUT="MeetingMinutes-v${VERSION}-build${{ github.run_number }}.apk"
+          mkdir -p dist && cp "$APK" "dist/$OUT"
+          cp core/build/sample-transcript.md "dist/sample-transcript.md" || true
+          sha256sum "dist/$OUT" | tee "dist/$OUT.sha256"
+          echo "apk=android/MeetingMinutes/dist/$OUT" >> "$GITHUB_OUTPUT"
+          echo "sha=android/MeetingMinutes/dist/$OUT.sha256" >> "$GITHUB_OUTPUT"
+          echo "tag=minutes-v${VERSION}-build${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MeetingMinutes-apk
+          path: |
+            ${{ steps.collect.outputs.apk }}
+            ${{ steps.collect.outputs.sha }}
+          if-no-files-found: error
+
+      - name: Upload generated signing key (only when no secret was configured)
+        if: steps.signing.outputs.generated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: minutes-signing-key
+          path: |
+            ${{ runner.temp }}/keys/release.jks
+            ${{ runner.temp }}/keys/keystore-password.txt
+          retention-days: 30
+
+      - name: Unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minutes-core-test-report
+          path: android/MeetingMinutes/core/build/reports/tests/test
+          if-no-files-found: ignore
+
+      - name: Publish GitHub release with the APK
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.collect.outputs.tag }}
+          name: Meeting Minutes ${{ steps.collect.outputs.version }} (build ${{ github.run_number }})
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ github.ref_name != 'main' }}
+          body: |
+            Android APK built from `${{ github.ref_name }}` @ ${{ github.sha }}.
+
+            Install: download the `.apk` on the phone, allow "install unknown apps" for your browser or file manager, open it.
+            SHA-256 is in the `.sha256` file.
+          files: |
+            ${{ steps.collect.outputs.apk }}
+            ${{ steps.collect.outputs.sha }}

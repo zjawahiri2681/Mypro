@@ -25,6 +25,9 @@ Google Drive > Second Brain > AGENTS.md. Read that first when Drive is connected
 - `android/IPTVBox/` - Android IPTV player (M3U / Xtream / Stalker, EPG, watch-together). APK is built by
   `.github/workflows/android-build.yml` and published as a GitHub Release on every push to that folder.
   Core parsers/protocol are pure JVM: `IPTVBOX_CORE_ONLY=1 ./gradlew :core:test` runs without the Android SDK.
+- `android/MeetingMinutes/` - Android meeting recorder (live transcript or audio + notes, speakers, topics, replies,
+  decisions, actions) exporting `YYYY-MM-DD Title.md` for AI minute drafting. APK from
+  `.github/workflows/meeting-minutes-build.yml`, release tag `minutes-v*`. Core tests: `MINUTES_CORE_ONLY=1 ./gradlew :core:test`.
 
 ## Desktop folders
 Filled in once this repo is shared through Remote Control. One line per folder:
