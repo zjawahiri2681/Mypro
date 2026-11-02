@@ -16,8 +16,8 @@ class ReplayGuard(
 
     /** Offline chat can arrive late, so queued text gets a longer window than call signalling. */
     @Synchronized
-    fun accept(from: String, id: String, ts: Long, now: Long = System.currentTimeMillis(), window: Long = windowMs): Boolean {
-        if (ts > now + skewMs) return false
+    fun accept(from: String, id: String, ts: Long, now: Long = System.currentTimeMillis(), window: Long = windowMs, futureSkew: Long = skewMs): Boolean {
+        if (ts > now + futureSkew) return false
         if (ts < now - window) return false
         val key = "$from/$id"
         if (seen.containsKey(key)) return false

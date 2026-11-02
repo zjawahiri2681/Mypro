@@ -40,6 +40,7 @@ import com.mypro.familytalk.FamilyTalkApp
 import com.mypro.familytalk.core.family.Invite
 import com.mypro.familytalk.service.LinkService
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
 fun OnboardingScreen(app: FamilyTalkApp, removed: Boolean) {
@@ -95,7 +96,10 @@ fun OnboardingScreen(app: FamilyTalkApp, removed: Boolean) {
                         Text("Invite to “${invite.familyName}” from ${invite.adminName}", style = MaterialTheme.typography.titleMedium)
                         androidx.compose.runtime.LaunchedEffect(invite.secret) { if (myName.isBlank()) invite.forName?.let { myName = it } }
                     } else {
-                        OutlinedTextField(code, { code = it.trim() }, label = { Text("Invite code (starts with FT1:)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                        val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                        Button({ code = clipboard.getText()?.text ?: "" }, Modifier.fillMaxWidth().height(52.dp)) { Text("Paste invite message") }
+                        OutlinedTextField(code, { code = it }, label = { Text("…or paste/type the invite here") }, modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 6)
+                        if (code.isNotBlank()) Text(runCatching { Invite.decode(code); "" }.exceptionOrNull()?.message ?: "", color = MaterialTheme.colorScheme.error)
                         OutlinedButton({ scan.launch(scanOptions()) }, Modifier.fillMaxWidth()) { Icon(Icons.Filled.QrCodeScanner, null); Spacer(Modifier.size(8.dp)); Text("Scan QR instead") }
                     }
                     OutlinedTextField(myName, { myName = it.take(40) }, label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -127,8 +131,21 @@ fun WaitingForAdmissionScreen(app: FamilyTalkApp) {
             Text("Waiting for the family admin's phone…", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
             if (waited > 60) Text("Still waiting. Make sure the admin's phone has FamilyTalk open and internet. If the invite was already used or is older than 24 hours, ask for a new one.",
                 textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.error)
-            Text("Their FamilyTalk needs to be online to add you. This usually takes a few seconds. You'll get your extension number as soon as you're in.",
+            Text("Their FamilyTalk needs to be online to add you, and they must tap Allow. You'll get your extension number as soon as you're in.",
                 textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val online by app.family.relayConnected.collectAsStateWithLifecycle()
+            val relayErr by app.family.relayError.collectAsStateWithLifecycle()
+            val sentAt by app.family.joinSentAt.collectAsStateWithLifecycle()
+            Text(
+                when {
+                    online && sentAt != null -> "● Connected to relay · request sent ${java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(sentAt!!))} (re-sent every 30 s)"
+                    online -> "● Connected to relay"
+                    relayErr != null -> "○ Can't reach the relay: $relayErr — check internet / VPN / firewall"
+                    else -> "○ Connecting to relay…"
+                },
+                textAlign = TextAlign.Center, color = if (online) trustOk() else MaterialTheme.colorScheme.error,
+            )
+            if (online) TextButton({ app.family.sendJoinRequest() }) { Text("Send request again") }
             app.family.data.value.pinnedAdmin?.let { admin ->
                 Text("The admin's phone will show a number. It should start with:", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(

@@ -100,13 +100,17 @@ class Messenger(
         if (known == null && payload !is JoinRequest) return
         val window = if (isDurable(payload)) DURABLE_WINDOW else SIGNAL_WINDOW
         if (!isDurable(payload) && env.ts < signalNotBefore) return
-        if (!guard.accept(env.from, env.id, env.ts, clock(), window)) return
+        // Phones with a wrong clock must still be able to chat and join; signalling stays strict.
+        val skew = if (isDurable(payload)) DURABLE_FUTURE_SKEW else SIGNAL_FUTURE_SKEW
+        if (!guard.accept(env.from, env.id, env.ts, clock(), window, skew)) { log("dropped (time/replay) from ${env.from.take(8)}"); return }
         onIncoming(Incoming(sender, payload, env.ts, known != null))
     }
 
     companion object {
         const val SIGNAL_WINDOW = 2 * 60 * 1000L
         const val DURABLE_WINDOW = 7 * 24 * 60 * 60 * 1000L
+        const val DURABLE_FUTURE_SKEW = 24 * 60 * 60 * 1000L
+        const val SIGNAL_FUTURE_SKEW = 10 * 60 * 1000L
         /**
          * Ringing, cancelling and declining are queued by the broker (QoS 1) so a phone
          * whose connection blipped still rings; stale ones are dropped by the 2-minute window.

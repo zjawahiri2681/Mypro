@@ -75,3 +75,33 @@ class FamilyTest {
         assertEquals(102, r4.byId(son.memberId)!!.ext)
     }
 }
+
+class InviteTextTest {
+    private val dad = com.mypro.familytalk.core.crypto.IdentityKeys.generate()
+    private val admin = FamilyAdmin(dad)
+    private val roster = RosterCodec.verify(admin.create("Al Family", "Baba"), null, dad.public)
+    private val invite = admin.invite(roster, "Ali")
+    private val code = invite.encode()
+
+    @Test fun bareCodeAndScannedQr() {
+        assertEquals(invite, Invite.decode(code))
+        assertEquals(invite, Invite.decode("  $code\n"))
+    }
+
+    @Test fun wholeForwardedMessage() {
+        assertEquals(invite, Invite.decode(Invite.shareMessage(invite)))
+        assertEquals(invite, Invite.decode("Forwarded\n" + Invite.shareMessage(invite) + "\n\nSent from my phone"))
+    }
+
+    @Test fun codeWrappedOrWithInvisibleCharacters() {
+        val wrapped = code.chunked(37).joinToString("\n")
+        assertEquals(invite, Invite.decode("Join us: $wrapped"))
+        assertEquals(invite, Invite.decode("⁦" + code.chunked(50).joinToString("​ ") + "⁩"))
+    }
+
+    @Test fun truncatedOrMissingCodeGivesClearError() {
+        val e1 = kotlin.test.assertFailsWith<IllegalArgumentException> { Invite.decode(code.dropLast(20)) }
+        assertTrue(e1.message!!.contains("incomplete"))
+        kotlin.test.assertFailsWith<IllegalArgumentException> { Invite.decode("hello there") }
+    }
+}

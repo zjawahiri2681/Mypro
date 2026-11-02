@@ -103,18 +103,26 @@ fun VerifyScreen(app: FamilyTalkApp, nav: Nav, memberId: String) {
 fun InviteScreen(app: FamilyTalkApp, nav: Nav) {
     val ctx = LocalContext.current
     var forName by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf<String?>(null) }
+    var invite by remember { mutableStateOf<com.mypro.familytalk.core.family.Invite?>(null) }
     BackScaffold("Invite a family member", nav) {
-        if (code == null) {
-            Text("The invite works once and expires in 24 hours. Show the QR in person — anyone who scans it can join your family.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val inv = invite
+        if (inv == null) {
+            Text("The invite works for one person and expires in 24 hours. Show the QR, or send it by message to someone who isn't with you. Either way, you must tap Allow before they get in.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             OutlinedTextField(forName, { forName = it.take(40) }, label = { Text("Their name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button({ code = app.family.newInvite(forName.ifBlank { null }).encode() }, Modifier.fillMaxWidth().height(52.dp)) { Text("Create invite") }
+            Button({ invite = app.family.newInvite(forName.ifBlank { null }) }, Modifier.fillMaxWidth().height(52.dp)) { Text("Create invite") }
         } else {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                QrImage(code!!, 280.dp)
-                Text("On their phone: install FamilyTalk › Join with invite QR.", textAlign = TextAlign.Center)
-                Text("Keep this screen open. When they scan it, you'll be asked to allow them — check the number on their screen matches.", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                Text("The invite can only be shown, not sent: a code sent through another app could be copied by that app.", fontSize = 14.sp, color = trustWarn(), textAlign = TextAlign.Center)
+                QrImage(inv.encode(), 280.dp)
+                Text("Together: on their phone open FamilyTalk › Join with invite QR and scan this.", textAlign = TextAlign.Center)
+                OutlinedButton({
+                    ctx.startActivity(Intent.createChooser(
+                        Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, com.mypro.familytalk.core.family.Invite.shareMessage(inv)),
+                        "Send invite by message",
+                    ))
+                }, Modifier.fillMaxWidth().height(52.dp)) { Icon(Icons.Filled.Share, null); Spacer(Modifier.size(8.dp)); Text("Send invite by message") }
+                Text("Far away: send it by WhatsApp, SMS or e-mail. They paste the whole message into FamilyTalk.", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Anyone who sees that message could ask to join, so before you tap Allow, phone them and check the digits on both screens match.",
+                    fontSize = 14.sp, color = trustWarn(), textAlign = TextAlign.Center)
             }
         }
     }

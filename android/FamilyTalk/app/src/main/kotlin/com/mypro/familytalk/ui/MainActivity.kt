@@ -120,7 +120,7 @@ private fun JoinApprovals(app: FamilyTalkApp) {
         title = { androidx.compose.material3.Text("Let ${p.name.take(40)} join?") },
         text = {
             androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.Text("Someone used your invite. Only allow it if this is the person standing with you right now.")
+                androidx.compose.material3.Text("Someone used your invite. Only allow it if you are sure it's them: compare these digits with their screen, in person or on a phone call.")
                 androidx.compose.material3.Text("Their phone should show this safety number on its waiting screen:")
                 androidx.compose.material3.Text(
                     com.mypro.familytalk.core.crypto.SafetyNumber.format(p.safety).take(23),

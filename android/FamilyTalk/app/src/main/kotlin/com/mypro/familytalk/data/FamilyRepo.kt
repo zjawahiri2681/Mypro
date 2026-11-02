@@ -56,6 +56,10 @@ class FamilyRepo(private val context: Context) {
         .stateIn(scope, SharingStarted.Eagerly, _data.value.roster?.let { runCatching { it.roster() }.getOrNull() })
 
     val relayConnected = MutableStateFlow(false)
+    val relayError = MutableStateFlow<String?>(null)
+    /** Time the join request was last sent (joiner side), for the waiting screen. */
+    val joinSentAt = MutableStateFlow<Long?>(null)
+    private var joinLoop: kotlinx.coroutines.Job? = null
 
     /** Payload handlers registered by the call and chat layers. */
     val handlers = mutableListOf<(Incoming) -> Boolean>()
@@ -68,6 +72,7 @@ class FamilyRepo(private val context: Context) {
 
     /** Called with (old, new) roster so the chat can record "X joined / was removed". */
     var onRosterChanged: (Roster?, Roster) -> Unit = { _, _ -> }
+    var onJoinRequested: (String) -> Unit = {}
     private var relay: MqttRelay? = null
     private val guard = ReplayGuard().also { it.restore(_data.value.replay) }
 
@@ -106,10 +111,31 @@ class FamilyRepo(private val context: Context) {
     fun join(invite: Invite, myName: String) {
         require(System.currentTimeMillis() <= invite.expiresAt) { "This invite has expired. Ask for a new one." }
         save {
-            it.copy(myName = myName, pinnedAdmin = invite.admin, familyId = invite.familyId, joinRelay = invite.relay, roster = null, removed = false)
+            it.copy(myName = myName, pinnedAdmin = invite.admin, familyId = invite.familyId, joinRelay = invite.relay, joinInvite = invite, roster = null, removed = false)
         }
         connect()
-        messenger?.send(invite.admin, JoinRequest(myName, identity.public, invite.inviteId, invite.proof(myName, identity.public)), joining = true)
+        resumeJoinIfPending()
+    }
+
+    /** Keeps asking until the admin's phone answers (it may be offline or restarted). */
+    fun resumeJoinIfPending() {
+        if (_data.value.roster != null || _data.value.joinInvite == null) return
+        sendJoinRequest()
+        joinLoop?.cancel()
+        joinLoop = scope.launch {
+            while (_data.value.roster == null && _data.value.joinInvite != null) {
+                kotlinx.coroutines.delay(30_000)
+                if (relayConnected.value) sendJoinRequest()
+            }
+        }
+    }
+
+    fun sendJoinRequest() {
+        val invite = _data.value.joinInvite ?: return
+        if (_data.value.roster != null) return
+        val name = _data.value.myName
+        messenger?.send(invite.admin, JoinRequest(name, identity.public, invite.inviteId, invite.proof(name, identity.public)), joining = true)
+        joinSentAt.value = System.currentTimeMillis()
     }
 
     fun newInvite(forName: String?): Invite {
@@ -160,6 +186,8 @@ class FamilyRepo(private val context: Context) {
         save { it.copy(verified = if (verified) it.verified + memberId else it.verified - memberId) }
 
     fun leaveAndWipe() {
+        joinLoop?.cancel()
+        joinSentAt.value = null
         messenger?.stop(); messenger = null
         vault.wipe()
         java.io.File(context.filesDir, "received").deleteRecursively()
@@ -191,6 +219,7 @@ class FamilyRepo(private val context: Context) {
         relay = r; messenger = m; connectedWith = cfg
         m.start()
         connectionJob?.cancel()
+        scope.launch { r.lastError.collect { relayError.value = it } }
         connectionJob = scope.launch {
             r.connected.collect { up ->
                 relayConnected.value = up
@@ -261,7 +290,7 @@ class FamilyRepo(private val context: Context) {
             val stillIn = next.byId(myId) != null
             val old = roster.value
             save { d2 ->
-                d2.copy(roster = update.roster, familyId = next.familyId, joinRelay = null, removed = !stillIn,
+                d2.copy(roster = update.roster, familyId = next.familyId, joinRelay = null, joinInvite = null, removed = !stillIn,
                     peerPrekeys = d2.peerPrekeys.filterKeys { next.byId(it) != null },
                     verified = d2.verified.filter { next.byId(it) != null }.toSet())
             }
@@ -277,6 +306,8 @@ class FamilyRepo(private val context: Context) {
 
     private fun onJoinRequest(from: PublicIdentity, req: JoinRequest) {
         if (!isAdmin) return
+        // Already admitted but they missed the directory: send it again.
+        roster.value?.byId(from.memberId)?.let { _data.value.roster?.let { r -> send(from, RosterUpdate(r)) }; return }
         val invite = _data.value.invites.firstOrNull { it.inviteId == req.inviteId } ?: return
         if (req.identity != from || System.currentTimeMillis() > invite.expiresAt) return
         if (!invite.checkProof(req.name, from, req.proof)) return
@@ -284,6 +315,7 @@ class FamilyRepo(private val context: Context) {
         val safety = com.mypro.familytalk.core.crypto.SafetyNumber.forPair(identity.public, from)
         pendingJoins.update { it + PendingJoin(req.name, from, req, safety) }
         events.tryEmit("${req.name.take(40)} wants to join the family")
+        onJoinRequested(req.name.take(40))
     }
 
     /** The admin tapped Allow (true) or Deny (false) on a pending join. */

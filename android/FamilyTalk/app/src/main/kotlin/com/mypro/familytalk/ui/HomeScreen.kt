@@ -82,6 +82,7 @@ fun HomeScreen(app: FamilyTalkApp, nav: Nav) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val roster by app.family.roster.collectAsStateWithLifecycle()
     val online by app.family.relayConnected.collectAsStateWithLifecycle()
+    val relayErr by app.family.relayError.collectAsStateWithLifecycle()
     val history by app.chats.history.collectAsStateWithLifecycle()
     val unread = history.unread.values.sum()
     val me = roster?.byId(app.family.myId)
@@ -93,7 +94,7 @@ fun HomeScreen(app: FamilyTalkApp, nav: Nav) {
                     Column {
                         Text(roster?.familyName ?: "FamilyTalk", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            (if (online) "● Connected" else "○ Connecting…") + (me?.let { " · You are \u2066${it.ext}\u2069" } ?: ""),
+                            (if (online) "● Connected" else if (relayErr != null) "○ Can't reach relay" else "○ Connecting…") + (me?.let { " · You are \u2066${it.ext}\u2069" } ?: ""),
                             style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp,
                             color = if (online) trustOk() else MaterialTheme.colorScheme.onSurfaceVariant,
                         )

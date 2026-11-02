@@ -22,6 +22,8 @@ class MqttRelay(
     private val log: (String) -> Unit = {},
 ) : Relay {
     override val connected = MutableStateFlow(false)
+    /** Last connection problem in plain words, or null. Shown on screen to help diagnose. */
+    val lastError = MutableStateFlow<String?>(null)
     private val client = AtomicReference<MqttAsyncClient?>()
 
     override fun start(inbox: String, onMessage: (ByteArray) -> Unit) {
@@ -33,6 +35,7 @@ class MqttRelay(
         c.setCallback(object : MqttCallbackExtended {
             override fun connectComplete(reconnect: Boolean, serverURI: String?) {
                 connected.value = true
+                lastError.value = null
                 runCatching { c.subscribe(inbox, 1) }.onFailure { log("subscribe failed: ${it.message}") }
             }
             override fun connectionLost(cause: Throwable?) { connected.value = false; log("relay lost: ${cause?.message}") }
@@ -70,7 +73,9 @@ class MqttRelay(
             c.connect(opts, null, object : org.eclipse.paho.client.mqttv3.IMqttActionListener {
                 override fun onSuccess(token: org.eclipse.paho.client.mqttv3.IMqttToken?) {}
                 override fun onFailure(token: org.eclipse.paho.client.mqttv3.IMqttToken?, e: Throwable?) {
-                    log("connect failed: ${e?.message}"); retry()
+                    log("connect failed: ${e?.message}")
+                    lastError.value = (e?.cause?.message ?: e?.message ?: "unknown error").take(120)
+                    retry()
                 }
             })
         } catch (e: Exception) {

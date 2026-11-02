@@ -108,6 +108,18 @@ object Notifications {
         post(ctx, 1000 + (msg.conv.hashCode() and 0xffff), n)
     }
 
+    fun joinRequest(ctx: Context, name: String) {
+        val n = NotificationCompat.Builder(ctx, CH_MESSAGES)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("$name wants to join the family")
+            .setContentText("Open FamilyTalk to allow or deny")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(open(ctx, MainActivity::class.java, 40))
+            .build()
+        post(ctx, 4, n)
+    }
+
     fun missed(ctx: Context, who: String) {
         val n = NotificationCompat.Builder(ctx, CH_MISSED)
             .setSmallIcon(R.drawable.ic_notification)

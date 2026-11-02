@@ -31,11 +31,13 @@ class FamilyTalkApp : Application() {
             if (calls.inCall) sip.decline(c.key) else Notifications.incomingSip(this, c)
         }
         sip.onEnded = { Notifications.cancelIncoming(this) }
+        family.onJoinRequested = { name -> Notifications.joinRequest(this, name) }
         family.scope.launch {
             family.data.map { it.sip }.distinctUntilChanged().collect { acc -> runCatching { sip.configure(acc) } }
         }
         if (family.hasFamily) {
             family.connect()
+            family.resumeJoinIfPending()
             LinkService.start(this)
         }
         getSystemService(android.net.ConnectivityManager::class.java)?.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {

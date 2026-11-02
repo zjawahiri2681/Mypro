@@ -18,6 +18,8 @@ data class AppData(
     /** Known before the first roster arrives (joining). */
     val familyId: String? = null,
     val joinRelay: RelayConfig? = null,
+    /** The invite we are joining with, until the first roster arrives (kept across restarts). */
+    val joinInvite: Invite? = null,
     val roster: SignedRoster? = null,
     val removed: Boolean = false,
     /** Open invites (admin only). Single use; removed once someone joins with it. */
