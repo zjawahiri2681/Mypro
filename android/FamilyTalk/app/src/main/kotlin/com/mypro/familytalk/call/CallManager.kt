@@ -309,7 +309,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
                 joined.filter { it != family.myId }.forEach { connect(it) }
             }
             Effect.StopMedia -> { peers.values.forEach { it.close() }; peers.clear(); rtc.stopLocal() }
-            Effect.StartRingtone -> audio.startRingtone()
+            Effect.StartRingtone -> audio.startRingtone(loud = family.data.value.ringOnSilent)
             Effect.StopRingtone -> { audio.stopRingtone(); LinkService.cancelIncoming(context) }
             Effect.StartRingback -> audio.startRingback()
             Effect.StopRingback -> audio.stopRingback()

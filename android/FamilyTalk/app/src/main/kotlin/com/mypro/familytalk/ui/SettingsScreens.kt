@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PhoneForwarded
@@ -70,6 +71,13 @@ fun SettingsTab(app: FamilyTalkApp, nav: Nav) {
         } else {
             Item(Icons.Filled.Person, "Family admin", roster?.admins?.joinToString { "${it.name} (${it.ext})" } ?: "") {}
         }
+        SectionTitle("Calls")
+        ListItem(
+            leadingContent = { Icon(Icons.Filled.NotificationsActive, null) },
+            headlineContent = { Text("Family calls ring even on silent") },
+            supportingContent = { Text("Rings like an alarm when this phone or tablet is on silent or Do Not Disturb, so you never miss family. Outside (SIP) calls follow your normal sound settings.") },
+            trailingContent = { Switch(data.ringOnSilent, { app.family.setRingOnSilent(it) }) },
+        )
         SectionTitle("Outside calls")
         Item(Icons.Filled.PhoneForwarded, "SIP account", if (data.sip == null) "Not set up — needed for phone numbers" else "${data.sip!!.identityUri} · ${if (sipUi.registered) "Ready" else sipUi.registration}") { nav.go(Screen.Sip) }
         SectionTitle("Privacy")

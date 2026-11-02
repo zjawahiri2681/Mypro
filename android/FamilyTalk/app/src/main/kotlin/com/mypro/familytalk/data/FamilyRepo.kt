@@ -187,6 +187,7 @@ class FamilyRepo(private val context: Context) {
     fun setSecureScreen(on: Boolean) = save { it.copy(secureScreen = on) }
     fun setNotifPreview(on: Boolean) = save { it.copy(notifPreview = on) }
     fun setAutoUpdate(on: Boolean) = save { it.copy(autoUpdate = on) }
+    fun setRingOnSilent(on: Boolean) = save { it.copy(ringOnSilent = on) }
     fun markVerified(memberId: String, verified: Boolean) =
         save { it.copy(verified = if (verified) it.verified + memberId else it.verified - memberId) }
 

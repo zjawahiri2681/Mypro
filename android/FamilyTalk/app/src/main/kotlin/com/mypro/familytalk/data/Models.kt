@@ -43,6 +43,8 @@ data class AppData(
     val notifPreview: Boolean = false,
     /** Check GitHub for new FamilyTalk builds and download them in the background. */
     val autoUpdate: Boolean = true,
+    /** Family calls ring (on the alarm stream) even when the phone is on silent / Do Not Disturb. */
+    val ringOnSilent: Boolean = true,
 )
 
 /** A join request waiting for the admin to approve it on screen. */
