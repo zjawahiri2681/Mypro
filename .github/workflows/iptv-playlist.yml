@@ -1,0 +1,55 @@
+name: IPTV playlist (India + Hindi + Sports)
+
+# Rebuilds the playlist every 6 hours: checks every stream and swaps dead
+# links for working ones. Published at a fixed link:
+# https://github.com/zjawahiri2681/Mypro/releases/download/iptv-playlist/india_hindi_sports.m3u
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+  push:
+    paths:
+      - "iptv/**"
+      - ".github/workflows/iptv-playlist.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: iptv-playlist
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build and health-check playlist
+        run: python3 iptv/build_playlist.py --out dist
+
+      - name: Publish to the fixed release link
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          TAG=iptv-playlist
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "IPTV playlist (auto-updated)" \
+              --notes "Auto-generated." --latest=false --target "${{ github.sha }}"
+          fi
+          gh release upload "$TAG" dist/india_hindi_sports.m3u --clobber
+          {
+            echo "**Playlist link for your IPTV app:**"
+            echo
+            echo "https://github.com/${{ github.repository }}/releases/download/$TAG/india_hindi_sports.m3u"
+            echo
+            cat dist/report.md
+          } > dist/notes.md
+          gh release edit "$TAG" --notes-file dist/notes.md --latest=false
+          cat dist/report.md >> "$GITHUB_STEP_SUMMARY"
