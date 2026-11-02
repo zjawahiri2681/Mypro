@@ -184,16 +184,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app), LiveTranscriber.Li
     /** Returns an error message, or null if the meeting started. */
     fun startMeeting(): String? {
         val m = meeting ?: return null
-        if (m.title.isBlank()) return "Give the meeting a title."
+        // Automatic mode is "fill in later": only consent is required up front, title defaults to the date.
+        if (m.captureMode != CaptureMode.AUTOMATIC && m.title.isBlank()) return "Give the meeting a title."
         if (!m.consentConfirmed) return "Confirm that everyone has been told the meeting is being recorded."
-        val started = MeetingOps.start(m.copy(title = MeetingOps.clean(m.title)), System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        val title = MeetingOps.clean(m.title).ifBlank { "Meeting " + java.time.LocalDate.now() }
+        val started = MeetingOps.start(m.copy(title = title), now)
         meeting = started
         persist(started)
         setupIsNew = false
         repo.activeMeetingId = started.id
         resetComposer(started)
         screen = Screen.LIVE
+        // Automatic mode auto-starts recording from the live screen, which owns the mic-permission flow.
         return null
+    }
+
+    /** Create a meeting and jump straight into hands-free recording; details are filled in afterwards. */
+    fun quickStart(): String? {
+        val m = MeetingOps.newMeeting(UUID.randomUUID().toString(), "", System.currentTimeMillis())
+            .copy(title = "", captureMode = CaptureMode.AUTOMATIC, consentConfirmed = true)
+        meeting = m
+        setupIsNew = false
+        setupReturn = Screen.HOME
+        return startMeeting()
     }
 
     // ---- live -----------------------------------------------------------------------------
@@ -263,7 +277,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app), LiveTranscriber.Li
     private fun add(text: String, source: Source, confidence: Float?): Boolean {
         val m = meeting ?: return false
         val rec = RecorderService.state.value
-        val recording = m.captureMode == CaptureMode.AUDIO_AND_NOTES && rec.recording && rec.file != null
+        val recording = m.captureMode.recordsAudio && rec.recording && rec.file != null
         val draft = EntryDraft(
             text = text, speakerId = speakerId, topicId = topicId, type = entryType, replyToId = replyToId,
             source = source, confidence = confidence,
@@ -311,10 +325,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app), LiveTranscriber.Li
 
     fun startRecording() {
         val m = meeting ?: return
-        if (RecorderService.state.value.recording) return
+        if (RecorderService.state.value.active) return
         val name = "${m.id.take(8)}-${m.audioFiles.size + 1}.aac"
         updateMeeting { it.copy(audioFiles = it.audioFiles + name) }
-        RecorderService.start(getApplication(), repo.audioFile(name))
+        RecorderService.start(
+            getApplication(), repo.audioFile(name),
+            voiceActivated = m.captureMode == CaptureMode.AUTOMATIC,
+            noiseSuppression = m.noiseSuppression,
+        )
     }
 
     fun pauseOrResumeRecording() {

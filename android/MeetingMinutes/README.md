@@ -7,6 +7,9 @@ file built for an AI to turn into formal Minutes of Meeting.
 - **Live transcript:** speech becomes text as people talk. You tap who is speaking.
 - **Audio recording and notes:** records an `.aac` file (works with the screen off). You type the
   key points, and each note is stamped with its time in the audio.
+- **Automatic (hands-free):** tap **Record now** on the home screen. Recording starts when a voice
+  is first heard and runs in the background with the screen off, using the phone's noise
+  cancellation / voice focus. You fill in the title, people, topics and notes after the meeting.
 - Every entry is labelled **Discussion, Reply, Question, Decision, Action** or **Note**.
 - Replies link to the entry they answer, so the export shows threads.
 - Actions carry an owner and a due date.
@@ -67,6 +70,32 @@ Design rules:
 
 A full sample is written to `core/build/sample-transcript.md` by the tests.
 
+## Speech languages
+
+The language picker (live transcript) offers English (US/UK), Arabic — Saudi, **Egyptian, Yemeni,
+Lebanese and Moroccan** — **Malayalam, Telugu**, Urdu, Hindi and French. These are *requests* to
+the phone's speech engine: a dialect works only if that engine has the pack (often a download in
+Google app → Settings → Voice → Offline speech recognition). If a chosen language is not
+available, the live screen says so and offers to switch to online recognition.
+
+## Hands-free recording, and what it does and doesn't do
+
+- **Voice-activated start:** the service first measures the input level (no file written) and
+  starts the recording when speech crosses a threshold, so the file begins at the first voice.
+- **Background, screen off:** recording is a foreground service, so it continues with the screen
+  locked and the app in the background.
+- **Noise cancellation / voice focus:** recording uses the `VOICE_COMMUNICATION` audio source
+  (platform echo-cancel + noise-suppression + gain control, tuned for speech), and the listening
+  phase attaches the `NoiseSuppressor` / `AGC` effects where the device offers them. Toggle it off
+  in setup if voices come out clipped.
+- **A recording notification is always shown — by design and by the platform.** Android requires a
+  foreground-service notification for microphone use, and shows a microphone indicator and a
+  Privacy Dashboard entry no matter what any app does. This app therefore cannot record covertly
+  with "no notification": it keeps one *quiet, minimal* (`IMPORTANCE_MIN`, silent) notification,
+  and the consent step stays. Recording people without their knowledge is also unlawful in many
+  places. If you need silent, indicator-free capture, this app will not do it, and neither will a
+  stock Android device.
+
 ## Privacy
 
 - **No `INTERNET` permission:** the app itself cannot send anything anywhere. Data leaves the
@@ -88,7 +117,12 @@ A full sample is written to `core/build/sample-transcript.md` by the tests.
   app; press the mic again when you return. Some phones play a beep each time the recogniser
   restarts.
 - **One capture mode per meeting:** Android can't reliably give the microphone to the recorder
-  and the recogniser at once. Use audio mode when you need the recording as evidence.
+  and the recogniser at once. Use audio or automatic mode when you need the recording as evidence,
+  and live transcript when you want on-screen text. Automatic mode records audio only (no live
+  text); run it through your AI, or an on-device transcriber, afterwards.
+- **Voice-activation is a level threshold, not true speech detection:** a loud bang can start it,
+  and a very quiet talker may take a second to trigger. Once started it records continuously
+  (natural pauses included) until you pause or end.
 - **Arabic offline recognition** depends on the language pack being installed on the phone.
 
 ## Build

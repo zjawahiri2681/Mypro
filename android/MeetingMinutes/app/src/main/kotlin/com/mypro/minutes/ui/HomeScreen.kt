@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -26,6 +27,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -39,14 +42,23 @@ fun HomeScreen(vm: AppViewModel) {
     var confirmDelete by remember { mutableStateOf<Meeting?>(null) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
 
+    var confirmQuick by remember { mutableStateOf(false) }
     Scaffold(
         topBar = { TopAppBar(title = { Text("Meeting Minutes") }) },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = vm::newMeeting,
-                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
-                text = { Text("New meeting") },
-            )
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ExtendedFloatingActionButton(
+                    onClick = { confirmQuick = true },
+                    icon = { Icon(painterResource(com.mypro.minutes.R.drawable.ic_mic), contentDescription = null) },
+                    text = { Text("Record now") },
+                    containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                )
+                ExtendedFloatingActionButton(
+                    onClick = vm::newMeeting,
+                    icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                    text = { Text("New meeting") },
+                )
+            }
         },
     ) { pad ->
         if (vm.meetings.isEmpty()) {
@@ -82,6 +94,18 @@ fun HomeScreen(vm: AppViewModel) {
                 }
             }
         }
+    }
+
+    if (confirmQuick) {
+        ConfirmDialog(
+            title = "Record now, hands-free?",
+            message = "Recording starts when a voice is heard and keeps going in the background with the screen off. " +
+                "By starting, you confirm everyone present has been told the meeting is being recorded. " +
+                "You can fill in the title, people and notes afterwards.",
+            confirm = "Start recording",
+            onDismiss = { confirmQuick = false },
+            onConfirm = { vm.quickStart() },
+        )
     }
 
     confirmDelete?.let { m ->

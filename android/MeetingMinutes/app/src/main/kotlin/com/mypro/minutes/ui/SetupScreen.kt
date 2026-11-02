@@ -49,11 +49,19 @@ import com.mypro.minutes.core.Attendance
 import com.mypro.minutes.core.CaptureMode
 import com.mypro.minutes.core.Participant
 
+// Availability depends on the phone's speech engine having the pack; the list offers the choice,
+// the engine reports if it is unsupported (handled on the live screen).
 val LANGUAGES = listOf(
     "" to "Phone default",
     "en-US" to "English (US)",
     "en-GB" to "English (UK)",
     "ar-SA" to "Arabic (Saudi Arabia)",
+    "ar-EG" to "Arabic (Egyptian)",
+    "ar-YE" to "Arabic (Yemeni)",
+    "ar-LB" to "Arabic (Lebanese)",
+    "ar-MA" to "Arabic (Moroccan)",
+    "ml-IN" to "Malayalam",
+    "te-IN" to "Telugu",
     "ur-PK" to "Urdu",
     "hi-IN" to "Hindi",
     "fr-FR" to "French",
@@ -143,6 +151,7 @@ fun SetupScreen(vm: AppViewModel) {
                             when (mode) {
                                 CaptureMode.LIVE_TRANSCRIPT -> "Speech becomes text as people talk. Keep the screen on and the phone near the speakers."
                                 CaptureMode.AUDIO_AND_NOTES -> "Records an audio file (works with the screen off). You type the key points; each is linked to its time in the audio."
+                                CaptureMode.AUTOMATIC -> "Hands-free. Records in the background with the screen off and starts when a voice is heard. Fill in the title, people and notes afterwards. A quiet recording notification is shown (Android requires it)."
                             },
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -156,6 +165,14 @@ fun SetupScreen(vm: AppViewModel) {
                     text = "Keep speech on this phone (offline recognition)",
                     sub = "Recommended for confidential meetings. Needs the offline language pack (Google app > Settings > Voice). If off, audio is sent to the phone's speech service (usually Google) to be transcribed.",
                     onChange = { v -> vm.updateMeeting { it.copy(preferOffline = v) } },
+                )
+            }
+            if (m.captureMode.recordsAudio) {
+                CheckRow(
+                    checked = m.noiseSuppression,
+                    text = "Noise cancellation and voice focus",
+                    sub = "Uses the phone's echo-cancel, noise-suppression and gain control, tuned for speech. Turn off if voices sound clipped or distant in the recording.",
+                    onChange = { v -> vm.updateMeeting { it.copy(noiseSuppression = v) } },
                 )
             }
 

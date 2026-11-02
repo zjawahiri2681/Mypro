@@ -23,11 +23,24 @@ enum class Attendance(val label: String) { PRESENT("Present"), APOLOGIES("Apolog
 /**
  * LIVE_TRANSCRIPT: on-screen speech-to-text, entries attributed to the speaker you tap.
  * AUDIO_AND_NOTES: an audio file is recorded (works with the screen off) and entries are typed,
- * each stamped with its position in the audio. Android cannot reliably feed the microphone to both
- * the recorder and the speech recogniser at once, so a meeting uses one mode at a time.
+ * each stamped with its position in the audio.
+ * AUTOMATIC: hands-free. The audio file records itself in the background (screen off), starting
+ * when a voice is first heard and using the phone's noise-suppression / voice-focus. You fill in
+ * the title, people, topics and labels afterwards.
+ *
+ * Android cannot reliably feed the microphone to both the recorder and the speech recogniser at
+ * once, so a meeting uses one mode at a time. AUDIO_AND_NOTES and AUTOMATIC both record an audio
+ * file; only LIVE_TRANSCRIPT turns speech into text on screen.
  */
 @Serializable
-enum class CaptureMode(val label: String) { LIVE_TRANSCRIPT("Live transcript"), AUDIO_AND_NOTES("Audio recording + notes") }
+enum class CaptureMode(val label: String) {
+    LIVE_TRANSCRIPT("Live transcript"),
+    AUDIO_AND_NOTES("Audio recording + notes"),
+    AUTOMATIC("Automatic (hands-free)");
+
+    /** True for the modes that record an audio file. */
+    val recordsAudio: Boolean get() = this == AUDIO_AND_NOTES || this == AUTOMATIC
+}
 
 @Serializable
 data class Participant(
@@ -82,6 +95,8 @@ data class Meeting(
     val captureMode: CaptureMode = CaptureMode.LIVE_TRANSCRIPT,
     /** Keep speech recognition on the device (no audio leaves the phone). */
     val preferOffline: Boolean = true,
+    /** Apply the phone's noise-suppression / echo-cancel / voice-focus to the recording. */
+    val noiseSuppression: Boolean = true,
     val consentConfirmed: Boolean = false,
     val createdAt: Long,
     val startedAt: Long? = null,

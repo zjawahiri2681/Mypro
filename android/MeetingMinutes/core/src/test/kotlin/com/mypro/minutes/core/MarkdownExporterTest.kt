@@ -201,6 +201,15 @@ class MarkdownExporterTest {
         java.io.File("build/sample-transcript.md").writeText(md)
     }
 
+    @Test fun automaticModeExportsVoiceActivatedCaptureAndRecordsAudio() {
+        assertTrue(CaptureMode.AUTOMATIC.recordsAudio)
+        assertTrue(CaptureMode.AUDIO_AND_NOTES.recordsAudio)
+        assertFalse(CaptureMode.LIVE_TRANSCRIPT.recordsAudio)
+        val m = sample().copy(captureMode = CaptureMode.AUTOMATIC)
+        val fm = exporter.export(m).let { it.substring(4, it.indexOf("\n---\n", 4)) }
+        assertTrue("capture: automatic-voice-activated-audio-recording" in fm, fm)
+    }
+
     @Test fun aiPromptNamesTheFile() {
         val p = AiPrompt.minutes(sample())
         assertTrue("Weekly progress.md" in p)

@@ -46,6 +46,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -119,6 +120,12 @@ fun LiveScreen(vm: AppViewModel) {
         )
     }
 
+    // Automatic mode: begin hands-free recording as soon as the meeting opens (once), via the
+    // permission flow above. If it was already recorded and stopped, don't silently restart.
+    LaunchedEffect(m.id) {
+        if (m.captureMode == CaptureMode.AUTOMATIC && !rec.active && m.audioFiles.isEmpty()) startRecording()
+    }
+
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
 
@@ -136,10 +143,12 @@ fun LiveScreen(vm: AppViewModel) {
                         Text(m.title, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         val elapsed = clock(now - (m.startedAt ?: now))
                         val status = when {
-                            m.captureMode == CaptureMode.AUDIO_AND_NOTES && rec.recording ->
+                            m.captureMode.recordsAudio && rec.waitingForVoice -> "● Listening for voice"
+                            m.captureMode.recordsAudio && rec.recording ->
                                 if (rec.paused) "Recording paused" else "● Recording ${clock(rec.positionMs())}"
-                            vm.listening -> "● Listening"
-                            else -> "Not listening"
+                            m.captureMode == CaptureMode.LIVE_TRANSCRIPT && vm.listening -> "● Listening"
+                            m.captureMode == CaptureMode.LIVE_TRANSCRIPT -> "Not listening"
+                            else -> "Not recording"
                         }
                         Text("$elapsed · ${m.entries.size} entries · $status", style = MaterialTheme.typography.labelMedium)
                     }
@@ -186,22 +195,37 @@ fun LiveScreen(vm: AppViewModel) {
             }
             rec.error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(8.dp)) }
 
-            if (m.captureMode == CaptureMode.AUDIO_AND_NOTES) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (!rec.recording) {
-                        Button(onClick = ::startRecording) {
-                            Icon(painterResource(R.drawable.ic_record), null, Modifier.size(18.dp), tint = Color(0xFFE53935))
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (m.audioFiles.isEmpty()) "Start recording" else "Record new segment")
+            if (m.captureMode.recordsAudio) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (!rec.active) {
+                            Button(onClick = ::startRecording) {
+                                Icon(painterResource(R.drawable.ic_record), null, Modifier.size(18.dp), tint = Color(0xFFE53935))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (m.audioFiles.isEmpty()) "Start recording" else "Record new segment")
+                            }
+                        } else {
+                            OutlinedButton(onClick = vm::pauseOrResumeRecording, enabled = rec.recording) {
+                                Icon(painterResource(if (rec.paused) R.drawable.ic_record else R.drawable.ic_pause), null, Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (rec.paused) "Resume" else "Pause")
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Text(
+                                when {
+                                    rec.waitingForVoice -> "Listening… recording starts when a voice is heard"
+                                    rec.paused -> "Paused at ${clock(rec.positionMs())}"
+                                    else -> "Recording ${clock(rec.positionMs())}"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
                         }
-                    } else {
-                        OutlinedButton(onClick = vm::pauseOrResumeRecording) {
-                            Icon(painterResource(if (rec.paused) R.drawable.ic_record else R.drawable.ic_pause), null, Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (rec.paused) "Resume" else "Pause")
-                        }
-                        Spacer(Modifier.width(12.dp))
-                        Text(if (rec.paused) "Paused at ${clock(rec.positionMs())}" else "Recording ${clock(rec.positionMs())}", style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (rec.active && !rec.paused) {
+                        LinearProgressIndicator(
+                            progress = { rec.level / 100f },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        )
                     }
                 }
             }
@@ -216,10 +240,14 @@ fun LiveScreen(vm: AppViewModel) {
                 if (m.entries.isEmpty() && vm.partial.isEmpty()) {
                     item {
                         Text(
-                            if (m.captureMode == CaptureMode.LIVE_TRANSCRIPT)
-                                "Tap who is speaking, then the microphone. When the voice changes, tap the new speaker. Use Reply / Question / Decision / Action to label what is said. Tap any entry to correct it."
-                            else
-                                "Start the recording, then type key points. Tap who said it and label it Reply / Question / Decision / Action. Each note is linked to its time in the audio.",
+                            when (m.captureMode) {
+                                CaptureMode.LIVE_TRANSCRIPT ->
+                                    "Tap who is speaking, then the microphone. When the voice changes, tap the new speaker. Use Reply / Question / Decision / Action to label what is said. Tap any entry to correct it."
+                                CaptureMode.AUTOMATIC ->
+                                    "Recording hands-free in the background — you can lock the screen. It keeps the audio; type key points now or leave it and fill in the title, people and notes after the meeting. Each note you type is linked to its time in the audio."
+                                CaptureMode.AUDIO_AND_NOTES ->
+                                    "Start the recording, then type key points. Tap who said it and label it Reply / Question / Decision / Action. Each note is linked to its time in the audio."
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(16.dp),
                         )

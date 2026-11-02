@@ -72,6 +72,7 @@ class MarkdownExporter(
             when (m.captureMode) {
                 CaptureMode.LIVE_TRANSCRIPT -> if (m.preferOffline) "live-speech-to-text-on-device" else "live-speech-to-text"
                 CaptureMode.AUDIO_AND_NOTES -> "audio-recording-with-typed-notes"
+                CaptureMode.AUTOMATIC -> "automatic-voice-activated-audio-recording"
             },
         ).append('\n')
         append("consent_confirmed: ").append(m.consentConfirmed).append('\n')
