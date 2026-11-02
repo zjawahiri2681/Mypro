@@ -25,6 +25,7 @@ UA = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 (KHTML, like Gecko) Chr
 TIMEOUT = 8
 MAX_CANDIDATES = 8
 WORKERS = 64
+STRICT = False  # True = also download the first video segment before accepting a link
 PLAYLIST_NAME = "india_hindi_sports.m3u"
 PREVIOUS_URL = "https://github.com/zjawahiri2681/Mypro/releases/download/iptv-playlist/" + PLAYLIST_NAME
 
@@ -151,6 +152,10 @@ def is_alive(s: Stream) -> bool:
         if not text.startswith("#EXTM3U"):
             # direct TS / MP4 / audio stream
             return bool(data) and (data[:1] == b"\x47" or any(t in ctype for t in ("video", "audio", "octet-stream", "mpegurl")))
+        if not STRICT:
+            # Relaxed: the channel's playlist answers. Video segments are often
+            # region-locked to India, so they are not tested from the US runner.
+            return True
         # master playlist -> first variant
         if "#EXT-X-STREAM-INF" in text:
             variant = _first_uri(text.split("#EXT-X-STREAM-INF", 1)[1], final)
