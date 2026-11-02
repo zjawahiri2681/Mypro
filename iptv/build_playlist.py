@@ -35,8 +35,6 @@ SOURCES: list[tuple[str, list[str], str | None]] = [
     ("hindi", ["https://iptv-org.github.io/iptv/languages/hin.m3u"], None),
     ("sports", ["https://iptv-org.github.io/iptv/categories/sports.m3u"], None),
     ("india", ["https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8"], "india"),
-    # Official free ad-supported channels (Samsung TV Plus India), via github.com/matthuisman/i.mjh.nz
-    ("india", ["https://i.mjh.nz/SamsungTVPlus/in.m3u8"], None),
 ]
 
 # Subscription networks are never free legitimately; anything matching is an
