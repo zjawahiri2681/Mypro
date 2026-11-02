@@ -142,6 +142,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     /** Local loopback through the real WebRTC stack: you hear yourself after a round trip. */
     fun echoTest() = post {
         if (inCall) return@post
+        LinkService.enterCall(context, false)
         rtc.startLocal(false)
         audio.enterCall(speaker = false)
         lateinit var a: Peer
@@ -155,8 +156,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
             override fun onRemoteVideo(peer: Peer, track: VideoTrack) {}
         }
         val ice = family.roster.value?.relay?.ice ?: emptyList()
-        a = rtc.createPeer("echo-a", ice, false, wire) ?: return@post
-        b = rtc.createPeer("echo-b", ice, false, wire) ?: return@post
+        a = rtc.createPeer("echo-a", ice, false, wire) ?: run { rtc.stopLocal(); audio.exitCall(); LinkService.exitCall(context); return@post }
+        b = rtc.createPeer("echo-b", ice, false, wire) ?: run { a.close(); rtc.stopLocal(); audio.exitCall(); LinkService.exitCall(context); return@post }
         echo = a to b
         _ui.value = CallUi("echo", CallPhase.CONNECTING, true, false, "Echo test (*43)", listOf(PeerUi("echo", "You, after a round trip", null, "connecting", null)), echoTest = true)
         a.offer()
@@ -165,7 +166,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
 
     private fun stopEcho() {
         echo?.let { it.first.close(); it.second.close() }; echo = null
-        rtc.stopLocal(); audio.exitCall()
+        rtc.stopLocal(); audio.exitCall(); LinkService.exitCall(context)
         _ui.value = _ui.value?.copy(phase = CallPhase.ENDED, endReason = "Echo test finished")
         exec.schedule({ if (session == null && echo == null) _ui.value = null }, 1500, TimeUnit.MILLISECONDS)
     }
@@ -202,6 +203,23 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     private fun onInvite(from: String, p: CallInvite) {
         val me = family.myId
         if (me !in p.participants || from !in p.participants) return
+        val s0 = session
+        // Glare: we are calling them 1:1 while they call us. Both phones keep the call with
+        // the smaller id, so exactly one call survives and is answered automatically.
+        if (s0 != null && s0.outgoing && s0.phase in setOf(CallPhase.OUTGOING, CallPhase.RINGING_OUT) &&
+            participants.size == 2 && from in participants && p.participants.size == 2 && p.video == video
+        ) {
+            if (p.callId < s0.callId) {
+                s0.on(CallEvent.LocalHangup, System.currentTimeMillis()) // drop ours silently, keep theirs
+                audio.stopRingback(); ticker?.cancel(false)
+                session = null
+                reset(p.callId, outgoing = false, p.video, p.participants.distinct())
+                originator = from; joined += from
+                apply(session!!.start())
+                event(CallEvent.LocalAccept)
+            }
+            return // the other phone does the mirror image
+        }
         if (inCall || externalBusy()) {
             if (p.callId != session?.callId) family.sendToMember(from, CallDecline(p.callId, "busy"))
             return
@@ -241,6 +259,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         val others = participants.filter { it != family.myId }
         val incomingFromCaller = !s.outgoing && s.phase == CallPhase.INCOMING
         when {
+            // We were still ringing and the caller gave up (or timed out): that's a missed call.
+            incomingFromCaller && from == originator -> event(CallEvent.PeerHungUp("missed"))
             others.size == 1 -> event(if (declined) CallEvent.PeerDeclined(reasonText(reason)) else CallEvent.PeerHungUp(reasonText(reason)))
             incomingFromCaller && joined.isEmpty() -> event(CallEvent.PeerHungUp("cancelled"))
             others.all { it in gone } -> event(CallEvent.PeerHungUp(if (declined) reasonText(reason) else "everyone left"))
@@ -310,11 +330,16 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         return peer
     }
 
+    private val bad = setOf(PeerConnection.PeerConnectionState.FAILED, PeerConnection.PeerConnectionState.DISCONNECTED)
+
     private fun updateMediaPhase() {
+        // Each broken link in a conference is repaired on its own (the offering side restarts ICE).
+        peers.values.filter { peerState[it.peerId] == PeerConnection.PeerConnectionState.FAILED && Mesh.shouldOffer(family.myId, it.peerId) }
+            .forEach { it.offer(iceRestart = true) }
         val states = peers.keys.mapNotNull { peerState[it] }
         when {
             states.any { it == PeerConnection.PeerConnectionState.CONNECTED } -> { event(CallEvent.MediaConnected); event(CallEvent.MediaRecovered) }
-            states.isNotEmpty() && states.all { it == PeerConnection.PeerConnectionState.FAILED || it == PeerConnection.PeerConnectionState.DISCONNECTED } -> event(CallEvent.MediaFailed)
+            states.isNotEmpty() && states.all { it in bad } -> event(CallEvent.MediaFailed)
         }
     }
 

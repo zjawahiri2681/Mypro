@@ -48,8 +48,8 @@
         <activity
             android:name=".ui.CallActivity"
             android:exported="false"
-            android:launchMode="singleInstance"
-            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.mypro.familytalk.call"
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:supportsPictureInPicture="true"

@@ -9,7 +9,8 @@ interface Relay {
     val connected: StateFlow<Boolean>
     /** Starts delivering messages published to [inbox] to [onMessage]. Reconnects by itself. */
     fun start(inbox: String, onMessage: (ByteArray) -> Unit)
-    fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean)
+    /** Returns false if the message could not be handed to the broker. */
+    fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean): Boolean
     fun stop()
 }
 
@@ -37,11 +38,12 @@ class LoopbackRelay(private val hub: Hub = Hub()) : Relay {
         connected.value = true
     }
 
-    override fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean) {
+    override fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean): Boolean {
         val target = synchronized(hub) {
             hub.inboxes[topic] ?: run { if (queueIfOffline) hub.offline.getOrPut(topic) { mutableListOf() }.add(data); null }
         }
         target?.invoke(data)
+        return true
     }
 
     override fun stop() { synchronized(hub) { mine?.let { hub.inboxes.remove(it) } }; connected.value = false }

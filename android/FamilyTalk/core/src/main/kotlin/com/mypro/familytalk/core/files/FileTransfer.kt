@@ -16,7 +16,7 @@ object FileTransfer {
     fun prepare(name: String, mime: String, data: ByteArray, now: Long = System.currentTimeMillis(), group: Boolean = false): Pair<FileOffer, List<FileChunk>> {
         require(data.size <= INLINE_LIMIT) { "File is larger than 25 MB" }
         val id = Bytes.b64(Bytes.random(12))
-        val parts = if (data.isEmpty()) listOf(ByteArray(0)) else data.toList().chunked(CHUNK).map { it.toByteArray() }
+        val parts = if (data.isEmpty()) listOf(ByteArray(0)) else (data.indices step CHUNK).map { data.copyOfRange(it, minOf(it + CHUNK, data.size)) }
         val offer = FileOffer(id, sanitizeName(name), mime.take(100), data.size.toLong(), Bytes.hex(Bytes.sha256(data)), parts.size, now, group)
         return offer to parts.mapIndexed { i, p -> FileChunk(id, i, Bytes.b64(p)) }
     }

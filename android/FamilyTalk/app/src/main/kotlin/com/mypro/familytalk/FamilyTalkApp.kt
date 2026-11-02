@@ -38,6 +38,9 @@ class FamilyTalkApp : Application() {
             family.connect()
             LinkService.start(this)
         }
+        getSystemService(android.net.ConnectivityManager::class.java)?.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) = family.onNetworkAvailable()
+        })
     }
 
     companion object {

@@ -77,7 +77,7 @@ class MessengerTest {
         val spy = object : com.mypro.familytalk.core.relay.Relay {
             override val connected = kotlinx.coroutines.flow.MutableStateFlow(true)
             override fun start(inbox: String, onMessage: (ByteArray) -> Unit) {}
-            override fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean) { seen += data }
+            override fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean): Boolean { seen += data; return true }
             override fun stop() {}
         }
         val m = Messenger(a, { "fam-secret-id" }, { family }, spy)

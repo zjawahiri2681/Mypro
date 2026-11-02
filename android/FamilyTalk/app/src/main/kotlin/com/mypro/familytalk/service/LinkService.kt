@@ -44,13 +44,13 @@ class LinkService : LifecycleService() {
     }
 
     private fun promote() {
-        val type = if (Build.VERSION.SDK_INT >= 34) {
-            var t = ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING
-            if (inCall) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            if (inCall && video) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-            t
-        } else 0
-        val n = Notifications.link(this, FamilyTalkApp.instance.family.relayConnected.value)
+        // Android 11+ needs the microphone/camera type for audio to keep flowing with the screen off.
+        var type = if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING else 0
+        if (inCall && Build.VERSION.SDK_INT >= 30) {
+            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            if (video) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        }
+        val n = if (inCall) Notifications.ongoingCall(this) else Notifications.link(this, FamilyTalkApp.instance.family.relayConnected.value)
         runCatching { ServiceCompat.startForeground(this, Notifications.ID_LINK, n, type) }
             .recoverCatching { ServiceCompat.startForeground(this, Notifications.ID_LINK, n, if (Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING else 0) }
     }

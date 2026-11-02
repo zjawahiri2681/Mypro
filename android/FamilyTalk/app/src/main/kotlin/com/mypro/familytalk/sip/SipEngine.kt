@@ -32,13 +32,22 @@ class SipEngine(private val context: Context) {
     var onIncoming: (SipCallUi) -> Unit = {}
     var onEnded: () -> Unit = {}
 
+    /**
+     * Linphone 5.3+ requires every Core call on the thread that created it, and that
+     * thread needs a Looper for auto-iterate. Everything below runs on this thread.
+     */
+    private val thread = android.os.HandlerThread("ft-sip").apply { start() }
+    private val handler = android.os.Handler(thread.looper)
+    private fun onSip(block: () -> Unit) { handler.post { runCatching(block).onFailure { Log.e(TAG, "sip", it) } } }
+
+    @Volatile private var callCount = 0
     private var core: Core? = null
     private var localConference: org.linphone.core.Conference? = null
     /** SDES-SRTP keys travel inside SIP signalling, so voice is only protected when signalling is TLS. */
     private var tlsSignalling = false
     private val connectedAt = mutableMapOf<Call, Long>()
 
-    val busy: Boolean get() = (core?.callsNb ?: 0) > 0
+    val busy: Boolean get() = callCount > 0
 
     private val listener = object : CoreListenerStub() {
         override fun onAccountRegistrationStateChanged(core: Core, account: Account, state: RegistrationState?, message: String) {
@@ -65,8 +74,10 @@ class SipEngine(private val context: Context) {
         }
     }
 
-    fun configure(account: SipAccount?) {
-        if (account == null || !account.enabled || account.problems().isNotEmpty()) { shutdown(); _ui.value = SipUi(); return }
+    fun configure(account: SipAccount?) = onSip { configureNow(account) }
+
+    private fun configureNow(account: SipAccount?) {
+        if (account == null || !account.enabled || account.problems().isNotEmpty()) { shutdownNow(); _ui.value = SipUi(); return }
         val c = core ?: Factory.instance().createCore(null, null, context).also {
             it.addListener(listener)
             // Always check the provider's TLS certificate and host name.
@@ -108,27 +119,34 @@ class SipEngine(private val context: Context) {
         _ui.value = _ui.value.copy(configured = true, registration = "Connecting...")
     }
 
+    /** Returns false straight away if the account isn't registered; the call itself starts on the SIP thread. */
     fun call(uri: String): Boolean {
-        val c = core ?: return false
-        val addr = Factory.instance().createAddress(uri) ?: return false
-        val params = c.createCallParams(null) ?: return false
-        params.mediaEncryption = c.mediaEncryption
-        params.isVideoEnabled = false
-        return c.inviteAddressWithParams(addr, params) != null
+        if (!_ui.value.registered) return false
+        onSip {
+            val c = core ?: return@onSip
+            val addr = Factory.instance().createAddress(uri) ?: return@onSip
+            val params = c.createCallParams(null) ?: return@onSip
+            params.mediaEncryption = c.mediaEncryption
+            params.isVideoEnabled = false
+            c.inviteAddressWithParams(addr, params)
+        }
+        return true
     }
 
-    fun accept(key: String) { find(key)?.accept() }
-    fun decline(key: String) { find(key)?.decline(Reason.Declined) }
-    fun hangup(key: String) { find(key)?.terminate() }
-    fun hangupAll() { core?.terminateAllCalls() }
-    fun togglePause(key: String) { find(key)?.let { if (it.state == Call.State.Paused) it.resume() else it.pause() }; refresh() }
+    fun accept(key: String) = onSip { find(key)?.accept() }
+    fun decline(key: String) = onSip { find(key)?.decline(Reason.Declined) }
+    fun hangup(key: String) = onSip { find(key)?.terminate() }
+    fun hangupAll() = onSip { core?.terminateAllCalls() }
+    fun togglePause(key: String) = onSip { find(key)?.let { if (it.state == Call.State.Paused) it.resume() else it.pause() }; refresh() }
 
-    fun toggleMic() { core?.let { it.isMicEnabled = !it.isMicEnabled }; refresh() }
+    fun toggleMic() = onSip { core?.let { it.isMicEnabled = !it.isMicEnabled }; refresh() }
 
-    fun sendDtmf(key: String, digit: Char) { find(key)?.sendDtmf(digit) }
+    fun sendDtmf(key: String, digit: Char) = onSip { find(key)?.sendDtmf(digit) }
 
     /** Merges every SIP call on this phone into one local audio conference. */
-    fun mergeAll() {
+    fun mergeAll() = onSip { mergeNow() }
+
+    private fun mergeNow() {
         val c = core ?: return
         if (c.callsNb < 2) return
         val conf = localConference ?: run {
@@ -141,13 +159,13 @@ class SipEngine(private val context: Context) {
         refresh()
     }
 
-    fun declineBusy(call: Call) = call.decline(Reason.Busy)
 
     private fun find(key: String): Call? = core?.calls?.firstOrNull { key(it) == key }
     private fun key(c: Call) = c.callLog.callId ?: c.remoteAddress.asStringUriOnly()
 
     private fun refresh() {
         val c = core ?: return
+        callCount = c.callsNb
         _ui.value = _ui.value.copy(
             calls = c.calls.map { call ->
                 SipCallUi(
@@ -174,7 +192,10 @@ class SipEngine(private val context: Context) {
         )
     }
 
-    fun shutdown() {
+    fun shutdown() = onSip { shutdownNow() }
+
+    private fun shutdownNow() {
+        callCount = 0
         core?.let { runCatching { it.terminateAllCalls(); it.clearAccounts(); it.clearAllAuthInfo(); it.stop() } }
     }
 

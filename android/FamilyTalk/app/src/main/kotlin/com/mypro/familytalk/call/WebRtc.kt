@@ -48,6 +48,7 @@ class WebRtc(private val context: Context) {
     }
 
     var audioTrack: AudioTrack? = null; private set
+    private var audioSource: org.webrtc.AudioSource? = null
     var videoTrack: VideoTrack? = null; private set
     private var videoSource: VideoSource? = null
     private var capturer: CameraVideoCapturer? = null
@@ -61,7 +62,8 @@ class WebRtc(private val context: Context) {
                 mandatory.add(MediaConstraints.KeyValuePair("googNoiseSuppression", "true"))
                 mandatory.add(MediaConstraints.KeyValuePair("googAutoGainControl", "true"))
             }
-            audioTrack = factory.createAudioTrack("ft-audio", factory.createAudioSource(constraints))
+            audioSource = factory.createAudioSource(constraints)
+            audioTrack = factory.createAudioTrack("ft-audio", audioSource)
         }
         if (video && videoTrack == null) startCamera()
     }
@@ -93,6 +95,7 @@ class WebRtc(private val context: Context) {
         videoSource?.dispose(); videoSource = null
         textureHelper?.dispose(); textureHelper = null
         audioTrack?.dispose(); audioTrack = null
+        audioSource?.dispose(); audioSource = null
     }
 
     fun createPeer(peerId: String, ice: List<IceServer>, relayOnly: Boolean, listener: Peer.Listener): Peer? {

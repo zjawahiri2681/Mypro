@@ -44,7 +44,8 @@ class MqttRelay(
         val opts = MqttConnectOptions().apply {
             isCleanSession = false
             isAutomaticReconnect = true
-            keepAliveInterval = 45
+            maxReconnectDelay = 15_000
+            keepAliveInterval = 120
             connectionTimeout = 15
             maxInflight = 64
             if (!user.isNullOrBlank()) userName = user
@@ -52,14 +53,42 @@ class MqttRelay(
             if (!pw.isNullOrBlank()) setPassword(pw.toCharArray())
         }
         client.set(c)
-        runCatching { c.connect(opts) }.onFailure { log("connect failed: ${it.message}") }
+        connectWithRetry(c, opts, 2_000)
     }
 
-    override fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean) {
+    private val timer = java.util.Timer("ft-relay-retry", true)
+
+    /** Paho only auto-reconnects after a first success, so the first connect is retried here. */
+    private fun connectWithRetry(c: MqttAsyncClient, opts: MqttConnectOptions, delayMs: Long) {
+        if (client.get() !== c) return
+        val retry = {
+            timer.schedule(object : java.util.TimerTask() {
+                override fun run() { connectWithRetry(c, opts, minOf(delayMs * 2, 30_000)) }
+            }, delayMs)
+        }
+        try {
+            c.connect(opts, null, object : org.eclipse.paho.client.mqttv3.IMqttActionListener {
+                override fun onSuccess(token: org.eclipse.paho.client.mqttv3.IMqttToken?) {}
+                override fun onFailure(token: org.eclipse.paho.client.mqttv3.IMqttToken?, e: Throwable?) {
+                    log("connect failed: ${e?.message}"); retry()
+                }
+            })
+        } catch (e: Exception) {
+            log("connect error: ${e.message}"); retry()
+        }
+    }
+
+    /** Call when the phone's network changes so we don't wait for the backoff timer. */
+    fun nudge() {
         val c = client.get() ?: return
-        if (!c.isConnected) return
-        runCatching { c.publish(topic, MqttMessage(data).apply { qos = if (queueIfOffline) 1 else 0 }) }
-            .onFailure { log("publish failed: ${it.message}") }
+        if (!c.isConnected) runCatching { c.reconnect() }
+    }
+
+    override fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean): Boolean {
+        val c = client.get() ?: return false
+        if (!c.isConnected) return false
+        return runCatching { c.publish(topic, MqttMessage(data).apply { qos = if (queueIfOffline) 1 else 0 }); true }
+            .getOrElse { log("publish failed: ${it.message}"); false }
     }
 
     override fun stop() {

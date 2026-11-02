@@ -66,17 +66,19 @@ class Messenger(
         val inner = json.encodeToString(Wire.serializer(), Wire(env, if (joining) me.public else null)).toByteArray()
         val wire = Sealed.sealOuter(inner, to.dhKeyBytes)
         val topic = Topics.inbox(familyId(), to.memberId)
-        if (!relay.connected.value && durable) {
-            synchronized(outbox) { outbox.addLast(topic to wire); while (outbox.size > 2000) outbox.removeFirst() }
-            return
-        }
-        relay.publish(topic, wire, durable)
+        val brokerQueued = durable || queueAtBroker(payload)
+        if (!relay.connected.value && durable) { enqueue(topic, wire); return }
+        if (!relay.publish(topic, wire, brokerQueued) && durable) enqueue(topic, wire)
+    }
+
+    private fun enqueue(topic: String, wire: ByteArray) {
+        synchronized(outbox) { outbox.addLast(topic to wire); while (outbox.size > 2000) outbox.removeFirst() }
     }
 
     /** Call when the relay reconnects. */
     fun flushOutbox() {
         val items = synchronized(outbox) { outbox.toList().also { outbox.clear() } }
-        items.forEach { (t, w) -> relay.publish(t, w, true) }
+        items.forEach { (t, w) -> if (!relay.publish(t, w, true)) enqueue(t, w) }
     }
 
     internal fun receive(bytes: ByteArray) {
@@ -105,6 +107,14 @@ class Messenger(
     companion object {
         const val SIGNAL_WINDOW = 2 * 60 * 1000L
         const val DURABLE_WINDOW = 7 * 24 * 60 * 60 * 1000L
+        /**
+         * Ringing, cancelling and declining are queued by the broker (QoS 1) so a phone
+         * whose connection blipped still rings; stale ones are dropped by the 2-minute window.
+         */
+        fun queueAtBroker(p: Payload) = p is com.mypro.familytalk.core.protocol.CallInvite ||
+            p is com.mypro.familytalk.core.protocol.CallHangup || p is com.mypro.familytalk.core.protocol.CallDecline ||
+            p is com.mypro.familytalk.core.protocol.CallAccept
+
         fun isDurable(p: Payload) = p is ChatText || p is ChatReceipt || p is FileOffer || p is FileChunk || p is RosterUpdate || p is JoinRequest ||
             p is com.mypro.familytalk.core.protocol.PrekeyAnnounce
     }

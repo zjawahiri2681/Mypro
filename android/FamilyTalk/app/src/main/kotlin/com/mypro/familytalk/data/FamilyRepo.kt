@@ -190,7 +190,8 @@ class FamilyRepo(private val context: Context) {
         m.onIncoming = ::dispatch
         relay = r; messenger = m; connectedWith = cfg
         m.start()
-        scope.launch {
+        connectionJob?.cancel()
+        connectionJob = scope.launch {
             r.connected.collect { up ->
                 relayConnected.value = up
                 if (up) { m.flushOutbox(); maintainPrekeys() }
@@ -198,7 +199,12 @@ class FamilyRepo(private val context: Context) {
         }
     }
 
-    fun disconnect() { messenger?.stop(); messenger = null }
+    private var connectionJob: kotlinx.coroutines.Job? = null
+
+    /** Network came back: reconnect now instead of waiting for the backoff timer. */
+    fun onNetworkAvailable() { relay?.nudge() }
+
+    fun disconnect() { messenger?.stop(); messenger = null; connectionJob?.cancel() }
 
     /** Weekly prekey rotation; old private prekeys are deleted after three weeks. */
     @Synchronized
@@ -244,7 +250,7 @@ class FamilyRepo(private val context: Context) {
             }
             else -> handlers.firstOrNull { it(msg) }
         }
-        if (Messenger.isDurable(msg.payload)) save { it.copy(replay = guard.snapshot()) }
+        if (Messenger.isDurable(msg.payload)) scheduleReplaySave()
     }
 
     private fun onRoster(update: RosterUpdate) {
@@ -300,6 +306,17 @@ class FamilyRepo(private val context: Context) {
             announcePrekeyTo(from)
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "join rejected: ${e.message}")
+        }
+    }
+
+    private var replaySaveJob: kotlinx.coroutines.Job? = null
+
+    /** Persists the replay cache at most every 5 s (a 25 MB file is ~500 messages). */
+    private fun scheduleReplaySave() {
+        if (replaySaveJob?.isActive == true) return
+        replaySaveJob = scope.launch {
+            kotlinx.coroutines.delay(5_000)
+            save { it.copy(replay = guard.snapshot()) }
         }
     }
 

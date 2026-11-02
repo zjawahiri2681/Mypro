@@ -57,6 +57,16 @@ object Notifications {
         .setContentIntent(open(ctx, MainActivity::class.java, 10))
         .build()
 
+    /** Shown during a call; tapping it returns to the call screen. */
+    fun ongoingCall(ctx: Context) = NotificationCompat.Builder(ctx, CH_LINK)
+        .setSmallIcon(R.drawable.ic_notification)
+        .setContentTitle("Family call in progress")
+        .setContentText("Tap to return to the call")
+        .setOngoing(true)
+        .setCategory(NotificationCompat.CATEGORY_CALL)
+        .setContentIntent(open(ctx, CallActivity::class.java, 11))
+        .build()
+
     fun incomingFamily(ctx: Context, call: CallUi) = buildIncoming(
         ctx, call.title, if (call.video) "Family video call" else "Family voice call",
         open(ctx, CallActivity::class.java, 21) { putExtra(CallActivity.EXTRA_ACCEPT, "family") }, action(ctx, CallActionReceiver.DECLINE, 22),
