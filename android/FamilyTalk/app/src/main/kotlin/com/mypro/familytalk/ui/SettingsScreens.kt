@@ -96,6 +96,8 @@ fun SettingsTab(app: FamilyTalkApp, nav: Nav) {
             trailingContent = { Switch(data.notifPreview, { app.family.setNotifPreview(it) }) },
         )
         Item(Icons.Filled.Info, "How FamilyTalk protects you", "Encryption, what servers can see, limits") { nav.go(Screen.Security) }
+        SectionTitle("App updates")
+        UpdateSettings(app)
         SectionTitle("Danger zone")
         Item(Icons.AutoMirrored.Filled.ExitToApp, "Leave family and erase this phone", "Deletes your keys, chats and files", danger = true) { wipe = true }
     }

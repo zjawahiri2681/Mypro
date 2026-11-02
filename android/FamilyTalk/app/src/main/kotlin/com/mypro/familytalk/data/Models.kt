@@ -41,6 +41,8 @@ data class AppData(
     val myPrekey: SignedPrekey? = null,
     /** Show message text in notifications (off: "New family message" only). */
     val notifPreview: Boolean = false,
+    /** Check GitHub for new FamilyTalk builds and download them in the background. */
+    val autoUpdate: Boolean = true,
 )
 
 /** A join request waiting for the admin to approve it on screen. */

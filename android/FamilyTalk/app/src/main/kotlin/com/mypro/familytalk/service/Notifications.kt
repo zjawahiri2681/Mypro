@@ -108,6 +108,17 @@ object Notifications {
         post(ctx, 1000 + (msg.conv.hashCode() and 0xffff), n)
     }
 
+    fun updateReady(ctx: Context, version: String, build: Int) {
+        val n = NotificationCompat.Builder(ctx, CH_MISSED)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("FamilyTalk update ready")
+            .setContentText("Version $version (build $build) is downloaded and checked. Tap to install.")
+            .setAutoCancel(true)
+            .setContentIntent(open(ctx, MainActivity::class.java, 50))
+            .build()
+        post(ctx, 5, n)
+    }
+
     fun joinRequest(ctx: Context, name: String) {
         val n = NotificationCompat.Builder(ctx, CH_MESSAGES)
             .setSmallIcon(R.drawable.ic_notification)

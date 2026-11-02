@@ -115,6 +115,7 @@ fun HomeScreen(app: FamilyTalkApp, nav: Nav) {
         },
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
+            UpdateBanner(app)
             ReadinessBanner()
             Box(Modifier.weight(1f)) {
                 when (tab) {
