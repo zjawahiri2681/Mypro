@@ -34,6 +34,8 @@ SOURCES: list[tuple[str, list[str], str | None]] = [
     ("india", ["https://iptv-org.github.io/iptv/countries/in.m3u",
                "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/in.m3u"], None),
     ("hindi", ["https://iptv-org.github.io/iptv/languages/hin.m3u"], None),
+    ("urdu", ["https://iptv-org.github.io/iptv/languages/urd.m3u"], None),
+    ("punjabi", ["https://iptv-org.github.io/iptv/languages/pan.m3u"], None),
     ("sports", ["https://iptv-org.github.io/iptv/categories/sports.m3u"], None),
     ("india", ["https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8"], "india"),
 ]
@@ -195,8 +197,12 @@ def group_for(ch: Channel, s: Stream) -> tuple[int, str]:
     cats = [c.strip() for c in s.attrs.get("group-title", "").split(";") if c.strip()]
     indian = "india" in ch.sources or ch.key.endswith(".in")
     if "sports" in ch.sources or any(c.lower() == "sports" for c in cats):
-        return (0, "Sports | India") if indian else (3, "Sports | World")
+        return (0, "Sports | India") if indian else (5, "Sports | World")
     cat = next((c for c in cats if c.lower() not in ("undefined", "india")), "General")
+    if "punjabi" in ch.sources:
+        return (3, f"Punjabi | {cat}")
+    if "urdu" in ch.sources and "hindi" not in ch.sources:
+        return (4, f"Urdu | {cat}")
     return (1, f"India | {cat}") if indian else (2, f"Hindi World | {cat}")
 
 
@@ -280,7 +286,8 @@ def main() -> int:
 
 
 def group_order(g: str) -> int:
-    return {"Sports | India": 0, "India": 1, "Hindi World": 2, "Sports | World": 3}.get(
+    return {"Sports | India": 0, "India": 1, "Hindi World": 2, "Punjabi": 3, "Urdu": 4,
+            "Sports | World": 5}.get(
         g if g.startswith("Sports") else g.split(" |")[0], 9)
 
 
