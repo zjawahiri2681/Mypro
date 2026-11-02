@@ -38,7 +38,7 @@ class MiniMqttRelay(
     private val user: String? = null,
     private val password: String? = null,
     private val log: (String) -> Unit = {},
-    private val keepAliveSec: Int = 120,
+    private val keepAliveSec: Int = 600,
 ) : Relay {
     override val connected = MutableStateFlow(false)
     val lastError = MutableStateFlow<String?>(null)
@@ -75,6 +75,12 @@ class MiniMqttRelay(
         runCatching { synchronized(this) { out?.write(byteArrayOf(0xE0.toByte(), 0)); out?.flush() } }
         closeSocket()
         exec.shutdownNow()
+    }
+
+    /** Wake-up alarm: if connected, ping (and reconnect if the link went quiet); else retry now. */
+    fun keepAlive() {
+        if (!running) return
+        if (connected.value) runCatching { exec.execute { ping() } } else nudge()
     }
 
     /** Network changed: retry now instead of waiting for the backoff. */
@@ -214,7 +220,8 @@ class MiniMqttRelay(
 
     private fun ping() {
         val o = out ?: return
-        if (System.currentTimeMillis() - lastInbound > keepAliveSec * 1500L) { onBroken(EOFException("relay stopped answering")); return }
+        // A whole keep-alive period without any reply (not even PINGRESP): the link is dead.
+        if (System.currentTimeMillis() - lastInbound > keepAliveSec * 1000L) { onBroken(EOFException("relay stopped answering")); return }
         runCatching { send(o, 0xC0, ByteArray(0)) }.onFailure { onBroken(it as Exception) }
     }
 
@@ -401,4 +408,5 @@ class MultiRelay(val relays: List<MiniMqttRelay>) : Relay {
         relays.filter { it.connected.value }.map { it.publish(topic, data, queueIfOffline) }.any { it }
     override fun stop() { relays.forEach { it.stop() }; scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
     fun nudge() = relays.forEach { it.nudge() }
+    fun keepAlive() = relays.forEach { it.keepAlive() }
 }

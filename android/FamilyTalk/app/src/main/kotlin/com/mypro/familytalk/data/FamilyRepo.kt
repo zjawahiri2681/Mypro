@@ -213,7 +213,9 @@ class FamilyRepo(private val context: Context) {
         val familyId = d.familyId ?: roster.value?.familyId ?: return
         val cfg = roster.value?.relay ?: d.joinRelay ?: RelayConfig()
         messenger?.stop()
-        val r = MultiRelay(cfg.endpoints().map { url -> MiniMqttRelay(url, d.clientId, cfg.brokerUser, cfg.brokerPassword, { Log.i(TAG, it) }) })
+        // Each connection needs its own client id: MQTT disconnects an older session that
+        // reuses an id, so two connections to the same broker would keep kicking each other off.
+        val r = MultiRelay(cfg.endpoints().mapIndexed { i, url -> MiniMqttRelay(url, "${d.clientId}-$i", cfg.brokerUser, cfg.brokerPassword, { Log.i(TAG, it) }) })
         val m = Messenger(
             identity, { familyId }, ::trusted, r, guard, log = { Log.i(TAG, it) },
             myPrekeys = { id -> _data.value.prekeys.firstOrNull { it.id == id } },
@@ -236,6 +238,9 @@ class FamilyRepo(private val context: Context) {
 
     /** Network came back: reconnect now instead of waiting for the backoff timer. */
     fun onNetworkAvailable() { relay?.nudge() }
+
+    /** Called by the wake-up alarm while the phone sleeps: ping, or reconnect a dead link. */
+    fun keepAlive() { relay?.keepAlive() }
 
     fun disconnect() { messenger?.stop(); messenger = null; connectionJob?.cancel() }
 

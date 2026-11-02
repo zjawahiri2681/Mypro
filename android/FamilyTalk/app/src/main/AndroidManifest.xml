@@ -81,6 +81,10 @@
             android:exported="false" />
 
         <receiver
+            android:name=".service.KeepAliveReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".update.InstallResultReceiver"
             android:exported="false" />
 

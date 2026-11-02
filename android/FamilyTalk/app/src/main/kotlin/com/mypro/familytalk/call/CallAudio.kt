@@ -49,10 +49,21 @@ class CallAudio(private val context: Context) {
 
     fun stopRingback() { ringback?.stopTone(); ringback?.release(); ringback = null }
 
+    private var focus: android.media.AudioFocusRequest? = null
+
     fun enterCall(speaker: Boolean) {
+        if (focus == null) {
+            focus = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .build().also { am.requestAudioFocus(it) }
+        }
         am.mode = AudioManager.MODE_IN_COMMUNICATION
-        setSpeaker(speaker)
+        // Tablets have no earpiece: always use the loudspeaker there.
+        setSpeaker(speaker || !hasEarpiece())
     }
+
+    private fun hasEarpiece(): Boolean =
+        am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { it.type == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE }
 
     fun setSpeaker(on: Boolean) {
         if (Build.VERSION.SDK_INT >= 31) {
@@ -72,5 +83,6 @@ class CallAudio(private val context: Context) {
         stopRingtone(); stopRingback()
         if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice() else @Suppress("DEPRECATION") run { am.isSpeakerphoneOn = false }
         am.mode = AudioManager.MODE_NORMAL
+        focus?.let { am.abandonAudioFocusRequest(it) }; focus = null
     }
 }

@@ -17,7 +17,7 @@ import com.mypro.familytalk.ui.MainActivity
 
 object Notifications {
     const val CH_LINK = "link"
-    const val CH_CALLS = "calls"
+    const val CH_CALLS = "calls_v2"
     const val CH_MESSAGES = "messages"
     const val CH_MISSED = "missed"
     const val ID_LINK = 1

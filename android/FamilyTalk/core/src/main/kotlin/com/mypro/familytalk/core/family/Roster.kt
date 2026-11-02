@@ -34,7 +34,7 @@ data class RelayConfig(
     val broker: String = DEFAULT_BROKER,
     val brokerUser: String? = null,
     val brokerPassword: String? = null,
-    val ice: List<IceServer> = listOf(IceServer(listOf("stun:stun.l.google.com:19302"))),
+    val ice: List<IceServer> = DEFAULT_STUN,
 ) {
     /**
      * Relays this family actually uses. With the public default, three public brokers on
@@ -45,6 +45,8 @@ data class RelayConfig(
 
     companion object {
         const val DEFAULT_BROKER = "ssl://broker.hivemq.com:8883"
+        /** Two independent STUN servers so one being blocked or down doesn't stop calls. */
+        val DEFAULT_STUN = listOf(IceServer(listOf("stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478")))
         val PUBLIC_RELAYS = listOf(
             "ssl://broker.hivemq.com:8883",
             "wss://broker.hivemq.com:8884/mqtt",

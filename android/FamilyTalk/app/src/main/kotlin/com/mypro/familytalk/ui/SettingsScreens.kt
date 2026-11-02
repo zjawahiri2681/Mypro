@@ -169,10 +169,11 @@ fun NetworkScreen(app: FamilyTalkApp, nav: Nav) {
     val roster by app.family.roster.collectAsStateWithLifecycle()
     val cfg = roster?.relay ?: RelayConfig()
     val turn = cfg.ice.firstOrNull { s -> s.urls.any { it.startsWith("turn") } }
+    val customStun = cfg.ice.filter { it != RelayConfig.DEFAULT_STUN.first() && it.urls.all { u -> u.startsWith("stun:") } }.flatMap { it.urls }
     var broker by remember { mutableStateOf(cfg.broker) }
     var bUser by remember { mutableStateOf(cfg.brokerUser ?: "") }
     var bPass by remember { mutableStateOf(cfg.brokerPassword ?: "") }
-    var turnUrl by remember { mutableStateOf(turn?.urls?.joinToString(",") ?: "") }
+    var turnUrl by remember { mutableStateOf(((turn?.urls ?: emptyList()) + customStun).joinToString(",\n")) }
     var turnUser by remember { mutableStateOf(turn?.username ?: "") }
     var turnPass by remember { mutableStateOf(turn?.credential ?: "") }
     val brokerOk = broker.startsWith("ssl://") || broker.startsWith("wss://")
@@ -183,20 +184,20 @@ fun NetworkScreen(app: FamilyTalkApp, nav: Nav) {
         OutlinedTextField(broker, { broker = it.trim() }, label = { Text("MQTT broker (ssl://host:8883)") }, singleLine = true, isError = !brokerOk, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(bUser, { bUser = it }, label = { Text("Broker username (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(bPass, { bPass = it }, label = { Text("Broker password (optional)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(turnUrl, { turnUrl = it.trim() }, label = { Text("TURN URL(s), e.g. turns:turn.example.com:5349") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Text("Calls between a phone on mobile data and one on Wi-Fi often need a TURN server. Free option: create a free account at metered.ca (20 GB/month), open TURN Server › Credentials and copy the URLs, username and password here.",
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedTextField(turnUrl, { turnUrl = it }, label = { Text("TURN/STUN URLs (comma or one per line)") }, placeholder = { Text("turn:global.relay.metered.ca:80, turns:global.relay.metered.ca:443?transport=tcp") }, minLines = 2, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(turnUser, { turnUser = it }, label = { Text("TURN username") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(turnPass, { turnPass = it }, label = { Text("TURN password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         Button({
             val ice = buildList {
-                val urls = turnUrl.split(',').map { it.trim() }.filter { it.startsWith("turn:") || it.startsWith("turns:") }
-                if (urls.isNotEmpty()) {
-                    // Use your own server for STUN too, so no third party (e.g. Google) sees call IPs.
-                    val host = urls.first().substringAfter(':').substringBefore('?').substringBefore(':')
-                    add(IceServer(listOf("stun:$host:3478")))
-                    add(IceServer(urls, turnUser.ifBlank { null }, turnPass.ifBlank { null }))
-                } else {
-                    add(IceServer(listOf("stun:stun.l.google.com:19302")))
-                }
+                val all = turnUrl.split(',', ' ', '\n').map { it.trim() }.filter { it.isNotEmpty() }
+                val turn = all.filter { it.startsWith("turn:") || it.startsWith("turns:") }
+                val stun = all.filter { it.startsWith("stun:") }
+                // Public STUN always stays, so direct calls are still tried before using (paid/limited) TURN.
+                addAll(RelayConfig.DEFAULT_STUN)
+                if (stun.isNotEmpty()) add(IceServer(stun))
+                if (turn.isNotEmpty()) add(IceServer(turn, turnUser.ifBlank { null }, turnPass.ifBlank { null }))
             }
             app.family.updateRelay(RelayConfig(broker, bUser.ifBlank { null }, bPass.ifBlank { null }, ice))
             nav.back()

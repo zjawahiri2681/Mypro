@@ -51,6 +51,8 @@ class Messenger(
 ) {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val outbox = ArrayDeque<Pair<String, ByteArray>>()
+    /** Call signalling waiting for a relay; useless after a minute, so it expires. */
+    private val signalOutbox = ArrayDeque<Triple<Long, String, ByteArray>>()
     var onIncoming: (Incoming) -> Unit = {}
 
     fun start() {
@@ -67,9 +69,17 @@ class Messenger(
         val wire = Sealed.sealOuter(inner, to.dhKeyBytes)
         val topic = Topics.inbox(familyId(), to.memberId)
         val brokerQueued = durable || queueAtBroker(payload)
-        if (!relay.connected.value && durable) { enqueue(topic, wire); return }
-        if (!relay.publish(topic, wire, brokerQueued) && durable) enqueue(topic, wire)
+        if (relay.connected.value && relay.publish(topic, wire, brokerQueued)) return
+        when {
+            durable -> enqueue(topic, wire)
+            brokerQueued -> synchronized(signalOutbox) {
+                signalOutbox.addLast(Triple(clock(), topic, wire)); while (signalOutbox.size > 500) signalOutbox.removeFirst()
+            }
+        }
     }
+
+    /** True if at least one relay is connected right now. */
+    val online: Boolean get() = relay.connected.value
 
     private fun enqueue(topic: String, wire: ByteArray) {
         synchronized(outbox) { outbox.addLast(topic to wire); while (outbox.size > 2000) outbox.removeFirst() }
@@ -79,6 +89,9 @@ class Messenger(
     fun flushOutbox() {
         val items = synchronized(outbox) { outbox.toList().also { outbox.clear() } }
         items.forEach { (t, w) -> if (!relay.publish(t, w, true)) enqueue(t, w) }
+        val now = clock()
+        val signals = synchronized(signalOutbox) { signalOutbox.toList().also { signalOutbox.clear() } }
+        signals.filter { now - it.first < 60_000 }.forEach { (_, t, w) -> relay.publish(t, w, true) }
     }
 
     internal fun receive(bytes: ByteArray) {

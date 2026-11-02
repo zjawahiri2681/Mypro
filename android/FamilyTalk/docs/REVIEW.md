@@ -78,3 +78,22 @@ After the fixes the reviewers' blocking items (all High findings) are resolved e
 **Arabic localisation**. The remaining open items are hardening steps, mostly for the self-hosted hub.
 Before relying on it, the family should: set up their own signing key (README), compare safety
 numbers once in person, and — for the strongest privacy — run the Family Hub (`server/`).
+
+## Round 2 — real-device test and calling (WebRTC/VoIP) expert
+
+Field test (Saudi home Wi-Fi on STC with IPv6, tablet + phone): joining hung, then calls
+stayed on "Connecting…" with no audio and the tablet did not ring. A fourth independent
+reviewer (WebRTC/VoIP) audited the call path.
+
+| Finding | Status |
+|---|---|
+| Relay unreachable: Paho tried only the IPv6 address; port 8883 may be filtered | **Fixed (0.2.1)** — own MQTT client, IPv4 first then IPv6; three relays on ports 8883 / 8884 / 443 used together |
+| All relay connections shared one MQTT client id, so two connections to the same broker kicked each other off every ~2 s | **Fixed (0.2.4)** — one client id per relay |
+| Call signalling dropped when device clocks differ by more than a few seconds | **Fixed (0.2.3)** — 30 min tolerance; replay protection by persisted message ids |
+| SDP/ICE overtaking the "accept" (relays don't keep order) were discarded | **Fixed (0.2.3)** — parked until that person has accepted |
+| Call messages sent while no relay was connected were lost silently (tablet never rang) | **Fixed (0.2.4)** — 60 s local queue for call signalling; offer + candidates re-sent every 3 s until answered; a repeated offer re-sends the answer |
+| Network writes on WebRTC's signalling thread | **Fixed (0.2.4)** |
+| ICE restart lost new-generation candidates; restart offer repeated on every state change | **Fixed (0.2.4)** |
+| Sleeping tablet: keep-alive timers stop in Doze, broker drops the link unnoticed | **Fixed (0.2.4)** — Doze-friendly wake-up alarm pings or reconnects; keep-alive 600 s |
+| Incoming-call channel could keep an old low importance; no mic permission check at answer; no audio focus; tablets without earpiece | **Fixed (0.2.4)** |
+| Only Google STUN: an estimated 25–40 % of mobile-data ↔ home-Wi-Fi calls cannot connect without TURN | **Partly fixed** — Google + Cloudflare STUN by default. **TURN needs a free account** (recommended: metered.ca, 20 GB/month, TURN over TLS on port 443); the admin enters it once in Settings › Relay & TURN servers and it is shared, signed, with every family phone. |

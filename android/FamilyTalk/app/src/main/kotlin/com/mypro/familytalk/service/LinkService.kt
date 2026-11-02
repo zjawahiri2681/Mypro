@@ -25,6 +25,7 @@ class LinkService : LifecycleService() {
     override fun onCreate() {
         super.onCreate()
         promote()
+        KeepAliveReceiver.schedule(this)
         val app = FamilyTalkApp.instance
         lifecycleScope.launch {
             app.family.relayConnected.collect { up ->
@@ -83,6 +84,33 @@ class LinkService : LifecycleService() {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (FamilyTalkApp.instance.family.hasFamily) LinkService.start(context)
+    }
+}
+
+/**
+ * While the phone sleeps (Doze), normal timers stop and the relay connection silently
+ * dies. A Doze-friendly alarm (about every 5-15 min) wakes the CPU briefly to ping or
+ * reconnect, so calls that were queued at the relay are delivered and ring.
+ */
+class KeepAliveReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val wl = context.getSystemService(android.os.PowerManager::class.java)
+            .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "FamilyTalk:keepalive")
+        wl.acquire(20_000)
+        runCatching { FamilyTalkApp.instance.family.keepAlive() }
+        schedule(context)
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ if (wl.isHeld) wl.release() }, 15_000)
+    }
+
+    companion object {
+        fun schedule(ctx: Context) {
+            val am = ctx.getSystemService(android.app.AlarmManager::class.java) ?: return
+            val pi = android.app.PendingIntent.getBroadcast(
+                ctx, 77, Intent(ctx, KeepAliveReceiver::class.java),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+            )
+            am.setAndAllowWhileIdle(android.app.AlarmManager.ELAPSED_REALTIME_WAKEUP, android.os.SystemClock.elapsedRealtime() + 5 * 60_000L, pi)
+        }
     }
 }
 

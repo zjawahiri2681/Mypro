@@ -134,13 +134,21 @@ class Peer(val peerId: String, private val listener: Listener) {
 
     private lateinit var pc: PeerConnection
     private val pendingIce = mutableListOf<IceCandidate>()
-    private var remoteSet = false
+    @Volatile private var remoteSet = false
+    @Volatile private var lastRemoteSdp: String? = null
+    /** Our last offer and the candidates gathered for it, so they can be re-sent if lost. */
+    @Volatile var pendingOffer: String? = null; private set
+    val localCandidates = java.util.concurrent.CopyOnWriteArrayList<IceCandidate>()
+    @Volatile var restartPending = false
+    @Volatile private var lastLocalAnswer: String? = null
+    val hasRemoteAnswer: Boolean get() = remoteSet && pendingOffer == null
     @Volatile var closed = false; private set
     var remoteVideo: VideoTrack? = null; private set
 
     internal fun attach(p: PeerConnection) { pc = p }
 
     fun offer(iceRestart: Boolean = false) {
+        if (iceRestart) localCandidates.clear()
         val c = MediaConstraints().apply { if (iceRestart) mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true")) }
         pc.createOffer(object : SimpleSdp() {
             override fun onCreateSuccess(sdp: SessionDescription) = setLocal(sdp)
@@ -149,10 +157,20 @@ class Peer(val peerId: String, private val listener: Listener) {
 
     fun onRemoteSdp(type: String, sdp: String) {
         if (closed) return
+        if (sdp == lastRemoteSdp) {
+            // The same offer again: our answer was probably lost, so send it once more.
+            if (type == "offer") lastLocalAnswer?.let { listener.onLocalSdp(this, "answer", it) }
+            return
+        }
+        lastRemoteSdp = sdp
         val desc = SessionDescription(SessionDescription.Type.fromCanonicalForm(type), sdp)
+        // New description (e.g. after an ICE restart): hold candidates until it is applied,
+        // otherwise new-generation candidates are rejected and lost.
+        remoteSet = false
         pc.setRemoteDescription(object : SimpleSdp() {
             override fun onSetSuccess() {
                 remoteSet = true
+                if (desc.type == SessionDescription.Type.ANSWER) { pendingOffer = null; restartPending = false }
                 synchronized(pendingIce) { pendingIce.forEach { pc.addIceCandidate(it) }; pendingIce.clear() }
                 if (desc.type == SessionDescription.Type.OFFER) {
                     pc.createAnswer(object : SimpleSdp() {
@@ -170,6 +188,8 @@ class Peer(val peerId: String, private val listener: Listener) {
     }
 
     private fun setLocal(sdp: SessionDescription) {
+        if (sdp.type == SessionDescription.Type.OFFER) pendingOffer = sdp.description
+        if (sdp.type == SessionDescription.Type.ANSWER) lastLocalAnswer = sdp.description
         pc.setLocalDescription(object : SimpleSdp() {
             override fun onSetSuccess() = listener.onLocalSdp(this@Peer, sdp.type.canonicalForm(), sdp.description)
         }, sdp)
@@ -187,7 +207,7 @@ class Peer(val peerId: String, private val listener: Listener) {
         override fun onIceConnectionChange(s: PeerConnection.IceConnectionState?) {}
         override fun onIceConnectionReceivingChange(b: Boolean) {}
         override fun onIceGatheringChange(s: PeerConnection.IceGatheringState?) {}
-        override fun onIceCandidate(c: IceCandidate) { if (!closed) listener.onLocalIce(this@Peer, c) }
+        override fun onIceCandidate(c: IceCandidate) { if (!closed) { localCandidates += c; listener.onLocalIce(this@Peer, c) } }
         override fun onIceCandidatesRemoved(c: Array<out IceCandidate>?) {}
         override fun onAddStream(s: MediaStream?) {}
         override fun onRemoveStream(s: MediaStream?) {}

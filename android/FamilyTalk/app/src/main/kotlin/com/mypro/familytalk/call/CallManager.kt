@@ -226,8 +226,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
                 session = null
                 reset(p.callId, outgoing = false, p.video, p.participants.distinct())
                 originator = from; joined += from
-                apply(session!!.start())
-                event(CallEvent.LocalAccept)
+                event(CallEvent.LocalAccept) // no ringtone: we were already calling them
             }
             return // the other phone does the mirror image
         }
@@ -319,6 +318,22 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         }
     }
 
+    private var lastResend = 0L
+
+    /** Messages can still be lost (relay switch, sleep): re-send our offer + candidates every 3 s until answered. */
+    private fun resendUnanswered() {
+        val s = session ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastResend < 3_000) return
+        lastResend = now
+        peers.values.forEach { p ->
+            val offer = p.pendingOffer ?: return@forEach
+            if (p.hasRemoteAnswer) return@forEach
+            family.sendToMember(p.peerId, Sdp(s.callId, "offer", offer))
+            p.localCandidates.forEach { c -> family.sendToMember(p.peerId, Ice(s.callId, c.sdpMid, c.sdpMLineIndex, c.sdp)) }
+        }
+    }
+
     private fun connect(peerId: String) {
         if (peerId == family.myId || peers.containsKey(peerId) || !canTalkTo(peerId)) return
         val parked = earlySdp.remove(peerId)
@@ -334,8 +349,9 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         val cfg = family.roster.value?.relay ?: return null
         val hasTurn = cfg.ice.any { s -> s.urls.any { it.startsWith("turn") } }
         val peer = rtc.createPeer(peerId, cfg.ice, family.data.value.relayOnly && hasTurn, object : Peer.Listener {
-            override fun onLocalSdp(peer: Peer, type: String, sdp: String) = family.sendToMember(peerId, Sdp(s.callId, type, sdp))
-            override fun onLocalIce(peer: Peer, c: IceCandidate) = family.sendToMember(peerId, Ice(s.callId, c.sdpMid, c.sdpMLineIndex, c.sdp))
+            // WebRTC calls these on its own signalling thread: never do network I/O there.
+            override fun onLocalSdp(peer: Peer, type: String, sdp: String) = post { family.sendToMember(peerId, Sdp(s.callId, type, sdp)) }
+            override fun onLocalIce(peer: Peer, c: IceCandidate) = post { family.sendToMember(peerId, Ice(s.callId, c.sdpMid, c.sdpMLineIndex, c.sdp)) }
             override fun onState(peer: Peer, state: PeerConnection.PeerConnectionState) = post {
                 if (peers[peerId] !== peer) return@post
                 peerState[peerId] = state
@@ -352,8 +368,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
 
     private fun updateMediaPhase() {
         // Each broken link in a conference is repaired on its own (the offering side restarts ICE).
-        peers.values.filter { peerState[it.peerId] == PeerConnection.PeerConnectionState.FAILED && Mesh.shouldOffer(family.myId, it.peerId) }
-            .forEach { it.offer(iceRestart = true) }
+        peers.values.filter { peerState[it.peerId] == PeerConnection.PeerConnectionState.FAILED && Mesh.shouldOffer(family.myId, it.peerId) && !it.restartPending }
+            .forEach { it.restartPending = true; it.offer(iceRestart = true) }
         val states = peers.keys.mapNotNull { peerState[it] }
         when {
             states.any { it == PeerConnection.PeerConnectionState.CONNECTED } -> { event(CallEvent.MediaConnected); event(CallEvent.MediaRecovered) }
@@ -367,7 +383,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         joined.clear(); gone.clear(); peers.clear(); earlyIce.clear(); earlySdp.clear(); peerState.clear(); remoteMedia.clear()
         _ui.value = null
         ticker?.cancel(false)
-        ticker = exec.scheduleWithFixedDelay({ post { session?.let { event(CallEvent.Tick(System.currentTimeMillis())) } } }, 1, 1, TimeUnit.SECONDS)
+        ticker = exec.scheduleWithFixedDelay({ post { session?.let { event(CallEvent.Tick(System.currentTimeMillis())); resendUnanswered() } } }, 1, 1, TimeUnit.SECONDS)
     }
 
     private fun finish(reason: String) {

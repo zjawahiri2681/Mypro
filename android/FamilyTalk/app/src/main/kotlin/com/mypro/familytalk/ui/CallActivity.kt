@@ -96,6 +96,7 @@ class CallActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         if (app.family.data.value.secureScreen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        askCallPermissions()
         handleAccept(intent)
         // Close when neither a family call nor a SIP call is left.
         lifecycleScope.launch {
@@ -120,6 +121,17 @@ class CallActivity : ComponentActivity() {
     }
 
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); handleAccept(intent) }
+
+    private val permLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) {}
+
+    /** Without the microphone permission a call connects but nobody hears you: ask right here. */
+    private fun askCallPermissions() {
+        val need = buildList {
+            add(android.Manifest.permission.RECORD_AUDIO)
+            if (app.calls.ui.value?.video == true) add(android.Manifest.permission.CAMERA)
+        }.filter { androidx.core.content.ContextCompat.checkSelfPermission(this, it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (need.isNotEmpty()) permLauncher.launch(need.toTypedArray())
+    }
 
     private fun handleAccept(intent: Intent?) {
         val what = intent?.getStringExtra(EXTRA_ACCEPT) ?: return
