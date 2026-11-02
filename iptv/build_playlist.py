@@ -35,7 +35,18 @@ SOURCES: list[tuple[str, list[str], str | None]] = [
     ("hindi", ["https://iptv-org.github.io/iptv/languages/hin.m3u"], None),
     ("sports", ["https://iptv-org.github.io/iptv/categories/sports.m3u"], None),
     ("india", ["https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8"], "india"),
+    # Official free ad-supported channels (Samsung TV Plus India), via github.com/matthuisman/i.mjh.nz
+    ("india", ["https://i.mjh.nz/SamsungTVPlus/in.m3u8"], None),
 ]
+
+# Subscription networks are never free legitimately; anything matching is an
+# unauthorised restream and is dropped whatever the source.
+PAID_RE = re.compile(
+    r"\b(star\s*(sports|plus|gold|movies|bharat|utsav|maa|vijay|jalsha|pravah|suvarna)|"
+    r"sony\s*(ten|six|sports|max|sab|pal|wah|aath|yay|bbc|pix|entertainment|marathi)|"
+    r"colors|sports\s*18|jio\s*(cinema|tv|hotstar)|hotstar|willow|sky\s*sports|bein|dazn|"
+    r"ten\s*[1-5]\b|eurosport|tnt\s*sports|espn|fox\s*sports|supersport|zee\s*(cinema|tv|anmol|cafe|action|classic|bollywood))",
+    re.I)
 
 RES_RE = re.compile(r"\((\d{3,4})p\)")
 TAG_RE = re.compile(r"\s*(\(\d{3,4}p\)|\[[^\]]*\])")
@@ -95,7 +106,9 @@ def parse_m3u(text: str, source: str, group_filter: str | None = None) -> list[S
         elif info:
             head, _, name = info.rpartition(",")
             attrs = dict(ATTR_RE.findall(head))
-            if not group_filter or group_filter in attrs.get("group-title", "").lower():
+            if PAID_RE.search(name):
+                pass
+            elif not group_filter or group_filter in attrs.get("group-title", "").lower():
                 out.append(Stream(line, name.strip(), attrs, opts, source))
             info, opts = None, []
     return out
