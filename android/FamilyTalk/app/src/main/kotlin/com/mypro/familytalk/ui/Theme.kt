@@ -6,6 +6,8 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -14,7 +16,8 @@ import androidx.compose.ui.unit.sp
 /**
  * "Oasis" palette. Deep teal = calm and trustworthy (the brand / security colour),
  * warm sand = family warmth for highlights. Call green / red follow the convention
- * every phone user already knows. All text pairs meet WCAG AA (4.5:1) contrast.
+ * every phone user already knows. Status colours are theme-aware (see [trustOk] /
+ * [trustWarn]) so text stays >= 4.5:1 on both light and dark surfaces.
  */
 object Brand {
     val Teal = Color(0xFF0F766E)
@@ -23,14 +26,18 @@ object Brand {
     val SandLight = Color(0xFFFBBF24)
     val Accept = Color(0xFF15803D)
     val Decline = Color(0xFFDC2626)
+    // Light-surface variants (5.0:1 on white). Use trustOk()/trustWarn() in UI code.
     val Verified = Color(0xFF15803D)
     val Unverified = Color(0xFFB45309)
+    // Dark-surface variants (10.0:1 and 12.1:1 on #0B1514).
+    val VerifiedOnDark = Color(0xFF4ADE80)
+    val UnverifiedOnDark = Color(0xFFFCD34D)
     val CallBg = Color(0xFF071311)
 
     /** Avatar colours: distinct hues, all readable with white initials. */
     val Avatars = listOf(
-        Color(0xFF0F766E), Color(0xFF7C3AED), Color(0xFFB45309), Color(0xFF2563EB),
-        Color(0xFFBE185D), Color(0xFF4D7C0F), Color(0xFF9333EA), Color(0xFF0E7490),
+        Color(0xFF0F766E), Color(0xFF7C3AED), Color(0xFF9333EA), Color(0xFF2563EB),
+        Color(0xFFBE185D), Color(0xFF4D7C0F), Color(0xFFA16207), Color(0xFF0E7490),
     )
 }
 
@@ -56,16 +63,27 @@ private val Dark = darkColorScheme(
     outline = Color(0xFF889895), error = Color(0xFFFF8A80),
 )
 
+// Line heights are left to the platform so Arabic diacritics are never clipped.
 private val Type = Typography(
-    headlineMedium = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.SemiBold, lineHeight = 32.sp),
-    titleLarge = TextStyle(fontSize = 21.sp, fontWeight = FontWeight.SemiBold, lineHeight = 28.sp),
-    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium, lineHeight = 24.sp),
-    bodyLarge = TextStyle(fontSize = 17.sp, lineHeight = 24.sp),
-    bodyMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp),
+    headlineMedium = TextStyle(fontSize = 26.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = TextStyle(fontSize = 21.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = TextStyle(fontSize = 17.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = TextStyle(fontSize = 17.sp),
+    bodyMedium = TextStyle(fontSize = 15.sp),
     labelLarge = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Medium),
 )
 
+val LocalDarkTheme = staticCompositionLocalOf { false }
+
+/** "Good / verified / connected" colour that stays readable on the current surface. */
+@Composable fun trustOk(): Color = if (LocalDarkTheme.current) Brand.VerifiedOnDark else Brand.Verified
+
+/** "Not verified yet / caution" colour that stays readable on the current surface. */
+@Composable fun trustWarn(): Color = if (LocalDarkTheme.current) Brand.UnverifiedOnDark else Brand.Unverified
+
 @Composable
 fun FamilyTalkTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) Dark else Light, typography = Type, content = content)
+    CompositionLocalProvider(LocalDarkTheme provides dark) {
+        MaterialTheme(colorScheme = if (dark) Dark else Light, typography = Type, content = content)
+    }
 }

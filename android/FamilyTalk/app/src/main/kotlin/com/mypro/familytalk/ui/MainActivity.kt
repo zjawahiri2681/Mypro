@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.mypro.familytalk.FamilyTalkApp
@@ -36,7 +37,6 @@ class MainActivity : ComponentActivity() {
     private val app get() = FamilyTalkApp.instance
     private val stack = mutableStateListOf<Screen>(Screen.Home)
 
-    private val perms = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,7 +47,6 @@ class MainActivity : ComponentActivity() {
             }
         }
         lifecycleScope.launch { app.family.events.collect { Toast.makeText(this@MainActivity, it, Toast.LENGTH_LONG).show() } }
-        askPermissions()
         handleIntent(intent)
         setContent {
             FamilyTalkTheme {
@@ -59,6 +58,7 @@ class MainActivity : ComponentActivity() {
                     WaitingForAdmissionScreen(app)
                 } else {
                     Navigator()
+                    JoinApprovals(app)
                 }
             }
         }
@@ -98,19 +98,40 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
-        val conv = intent?.getStringExtra("conv") ?: return
+        // Only our own notifications carry this per-process token, so other apps
+        // cannot open (and mark as read) a chat by sending us an Intent.
+        if (intent?.getStringExtra("token") != intentToken) return
+        val conv = intent.getStringExtra("conv") ?: return
         stack.clear(); stack.add(Screen.Home); stack.add(Screen.Chat(conv))
     }
 
-    private fun askPermissions() {
-        val wanted = buildList {
-            add(Manifest.permission.RECORD_AUDIO)
-            add(Manifest.permission.CAMERA)
-            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
-            if (Build.VERSION.SDK_INT >= 31) add(Manifest.permission.BLUETOOTH_CONNECT)
-        }
-        perms.launch(wanted.toTypedArray())
+    companion object {
+        val intentToken: String = java.util.UUID.randomUUID().toString()
     }
+}
+
+/** Admin side: a person who scanned an invite asks to join. Nobody gets in without a tap here. */
+@Composable
+private fun JoinApprovals(app: FamilyTalkApp) {
+    val pending by app.family.pendingJoins.collectAsStateWithLifecycle()
+    val p = pending.firstOrNull() ?: return
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = {},
+        title = { androidx.compose.material3.Text("Let ${p.name.take(40)} join?") },
+        text = {
+            androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.Text("Someone used your invite. Only allow it if this is the person standing with you right now.")
+                androidx.compose.material3.Text("Their phone should show this safety number on its waiting screen:")
+                androidx.compose.material3.Text(
+                    com.mypro.familytalk.core.crypto.SafetyNumber.format(p.safety).take(23),
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    style = androidx.compose.ui.text.TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
+                )
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton({ app.family.decideJoin(p, true) }) { androidx.compose.material3.Text("Allow") } },
+        dismissButton = { androidx.compose.material3.TextButton({ app.family.decideJoin(p, false) }) { androidx.compose.material3.Text("Deny") } },
+    )
 }
 
 class Nav(val go: (Screen) -> Unit, val back: () -> Unit)

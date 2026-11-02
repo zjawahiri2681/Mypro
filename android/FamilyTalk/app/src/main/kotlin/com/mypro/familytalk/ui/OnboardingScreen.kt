@@ -59,7 +59,7 @@ fun OnboardingScreen(app: FamilyTalkApp, removed: Boolean) {
             Icon(Icons.Filled.Shield, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(56.dp))
             Text("FamilyTalk", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "Private calls, video, chat and files for your family only. Everything is end-to-end encrypted on your phones — no accounts, no phone numbers, no ads.",
+                "Private calls, video, chat and files for your family only. Family calls and chats are end-to-end encrypted on your phones — no accounts, no phone numbers, no ads.",
                 style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (removed) Text("You were removed from your family. Start again or join with a new invite.", color = MaterialTheme.colorScheme.error)
@@ -93,9 +93,9 @@ fun OnboardingScreen(app: FamilyTalkApp, removed: Boolean) {
                     val invite = runCatching { Invite.decode(code) }.getOrNull()
                     if (invite != null) {
                         Text("Invite to “${invite.familyName}” from ${invite.adminName}", style = MaterialTheme.typography.titleMedium)
-                        if (myName.isBlank() && invite.forName != null) myName = invite.forName!!
+                        androidx.compose.runtime.LaunchedEffect(invite.secret) { if (myName.isBlank()) invite.forName?.let { myName = it } }
                     } else {
-                        OutlinedTextField(code, { code = it.trim() }, label = { Text("Invite code (FT1:...)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                        OutlinedTextField(code, { code = it.trim() }, label = { Text("Invite code (starts with FT1:)") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
                         OutlinedButton({ scan.launch(scanOptions()) }, Modifier.fillMaxWidth()) { Icon(Icons.Filled.QrCodeScanner, null); Spacer(Modifier.size(8.dp)); Text("Scan QR instead") }
                     }
                     OutlinedTextField(myName, { myName = it.take(40) }, label = { Text("Your name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -122,9 +122,21 @@ fun WaitingForAdmissionScreen(app: FamilyTalkApp) {
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(Modifier.safeDrawingPadding().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.CenterVertically)) {
             CircularProgressIndicator()
+            var waited by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            androidx.compose.runtime.LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(1000); waited++ } }
             Text("Waiting for the family admin's phone…", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+            if (waited > 60) Text("Still waiting. Make sure the admin's phone has FamilyTalk open and internet. If the invite was already used or is older than 24 hours, ask for a new one.",
+                textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.error)
             Text("Their FamilyTalk needs to be online to add you. This usually takes a few seconds. You'll get your extension number as soon as you're in.",
                 textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            app.family.data.value.pinnedAdmin?.let { admin ->
+                Text("The admin's phone will show a number. It should start with:", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    com.mypro.familytalk.core.crypto.SafetyNumber.format(com.mypro.familytalk.core.crypto.SafetyNumber.forPair(app.family.identity.public, admin)).take(23),
+                    style = MaterialTheme.typography.titleLarge.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                )
+            }
             Row { TextButton({ app.family.leaveAndWipe() }) { Text("Cancel and start over") } }
         }
     }

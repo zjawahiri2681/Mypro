@@ -26,7 +26,7 @@ class FamilyTalkApp : Application() {
         calls = CallManager(this, family, chats)
         sip = SipEngine(this)
         calls.externalBusy = { sip.busy }
-        chats.onNewMessage = { msg, name -> Notifications.message(this, msg, name) }
+        chats.onNewMessage = { msg, name -> Notifications.message(this, msg, name, family.data.value.notifPreview) }
         sip.onIncoming = { c ->
             if (calls.inCall) sip.decline(c.key) else Notifications.incomingSip(this, c)
         }

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ft_background">#0B1514</color>
+    <color name="ft_background">#F6F8F7</color>
     <color name="ft_primary">#0F766E</color>
     <color name="ft_icon_bg">#0F766E</color>
 </resources>

@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.CallReceived
 import androidx.compose.material.icons.filled.Dialpad
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Badge
@@ -38,6 +39,11 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import android.text.format.DateUtils
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -87,9 +93,9 @@ fun HomeScreen(app: FamilyTalkApp, nav: Nav) {
                     Column {
                         Text(roster?.familyName ?: "FamilyTalk", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
-                            (if (online) "● Connected" else "○ Connecting…") + (me?.let { " · You are ${it.ext}" } ?: ""),
+                            (if (online) "● Connected" else "○ Connecting…") + (me?.let { " · You are \u2066${it.ext}\u2069" } ?: ""),
                             style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp,
-                            color = if (online) Brand.Verified else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (online) trustOk() else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 },
@@ -101,17 +107,22 @@ fun HomeScreen(app: FamilyTalkApp, nav: Nav) {
                 NavigationBarItem(tab == 1, { tab = 1 }, {
                     BadgedBox(badge = { if (unread > 0) Badge { Text("$unread") } }) { Icon(Icons.AutoMirrored.Filled.Chat, null) }
                 }, label = { Text("Chats") })
+                NavigationBarItem(tab == 4, { tab = 4 }, { Icon(Icons.Filled.History, null) }, label = { Text("Recents") })
                 NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Filled.Dialpad, null) }, label = { Text("Keypad") })
                 NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Filled.Settings, null) }, label = { Text("Settings") })
             }
         },
     ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
-            when (tab) {
-                0 -> FamilyTab(app, nav)
-                1 -> ChatsTab(app, nav)
-                2 -> KeypadTab(app)
-                3 -> SettingsTab(app, nav)
+        Column(Modifier.padding(pad).fillMaxSize()) {
+            ReadinessBanner()
+            Box(Modifier.weight(1f)) {
+                when (tab) {
+                    0 -> FamilyTab(app, nav)
+                    1 -> ChatsTab(app, nav)
+                    2 -> KeypadTab(app)
+                    3 -> SettingsTab(app, nav)
+                    4 -> RecentsTab(app)
+                }
             }
         }
     }
@@ -122,6 +133,8 @@ private fun FamilyTab(app: FamilyTalkApp, nav: Nav) {
     val roster by app.family.roster.collectAsStateWithLifecycle()
     val data by app.family.data.collectAsStateWithLifecycle()
     val others = roster?.members?.filter { it.id != app.family.myId }.orEmpty().sortedBy { it.ext }
+    var ringAll by rememberSaveable { mutableStateOf(false) }
+    if (ringAll) ConfirmRingAll(others.size, { ringAll = false }) { app.calls.call(others, false) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -132,7 +145,7 @@ private fun FamilyTab(app: FamilyTalkApp, nav: Nav) {
                         Text("Whole family", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                         Text("Dial 0 to ring everyone", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                     }
-                    FilledTonalIconButton({ app.calls.call(others, false) }, enabled = others.isNotEmpty()) { Icon(Icons.Filled.Call, "Call everyone") }
+                    FilledTonalIconButton({ ringAll = true }, enabled = others.isNotEmpty()) { Icon(Icons.Filled.Call, "Call everyone") }
                     FilledTonalIconButton({ nav.go(Screen.Chat(FAMILY_CONV)) }) { Icon(Icons.AutoMirrored.Filled.Chat, "Family group chat") }
                 }
             }
@@ -151,7 +164,7 @@ private fun FamilyTab(app: FamilyTalkApp, nav: Nav) {
 
 @Composable
 private fun MemberCard(app: FamilyTalkApp, nav: Nav, m: Member, verified: Boolean) {
-    Card(Modifier.fillMaxWidth().clickable { nav.go(Screen.Chat(m.id)) }) {
+    Card(Modifier.fillMaxWidth().clickable(onClickLabel = "Open chat with ${m.name}") { nav.go(Screen.Chat(m.id)) }) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Avatar(m.name, m.color)
             Spacer(Modifier.width(12.dp))
@@ -159,7 +172,7 @@ private fun MemberCard(app: FamilyTalkApp, nav: Nav, m: Member, verified: Boolea
                 Text(m.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ExtChip(m.ext); Spacer(Modifier.width(8.dp))
-                    Box(Modifier.clickable { nav.go(Screen.Verify(m.id)) }) { TrustBadge(verified) }
+                    Box(Modifier.minimumInteractiveComponentSize().clickable(onClickLabel = "Verify ${m.name}") { nav.go(Screen.Verify(m.id)) }, contentAlignment = Alignment.Center) { TrustBadge(verified) }
                 }
             }
             FilledTonalIconButton({ app.calls.call(listOf(m), false) }) { Icon(Icons.Filled.Call, "Voice call ${m.name}") }
@@ -189,23 +202,32 @@ private fun ChatsTab(app: FamilyTalkApp, nav: Nav) {
                 supportingContent = { Text(last.text ?: last.file?.let { "📎 ${it.name}" } ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 trailingContent = {
                     Column(horizontalAlignment = Alignment.End) {
-                        Text(fmt.format(Date(last.at)), fontSize = 12.sp)
+                        Text(DateUtils.getRelativeTimeSpanString(last.at, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString(), fontSize = 13.sp)
                         if (n > 0) Badge { Text("$n") }
                     }
                 },
             )
         }
-        if (history.calls.isNotEmpty()) {
-            item { SectionTitle("Recent calls") }
+    }
+}
+
+@Composable
+private fun RecentsTab(app: FamilyTalkApp) {
+    val history by app.chats.history.collectAsStateWithLifecycle()
+    val roster by app.family.roster.collectAsStateWithLifecycle()
+    LazyColumn {
+        if (history.calls.isEmpty()) item {
+            Text("No calls yet.", Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
             items(history.calls.takeLast(30).reversed(), key = { "call-" + it.id + it.at }) { c ->
                 val names = c.with.joinToString { roster?.byId(it)?.name ?: "?" }
-                val missed = !c.outgoing && c.durationSec == 0L
+                val missed = !c.outgoing && c.durationSec == 0L && c.result in setOf("missed", "cancelled")
                 ListItem(
                     leadingContent = {
                         Icon(
                             when { missed -> Icons.Filled.CallMissed; c.outgoing -> Icons.Filled.CallMade; else -> Icons.Filled.CallReceived },
                             contentDescription = if (missed) "Missed" else if (c.outgoing) "Outgoing" else "Incoming",
-                            tint = if (missed) Brand.Decline else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (missed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     },
                     headlineContent = { Text(names, maxLines = 1) },
@@ -216,29 +238,44 @@ private fun ChatsTab(app: FamilyTalkApp, nav: Nav) {
                     },
                 )
             }
-        }
     }
+}
+
+@Composable
+private fun ConfirmRingAll(count: Int, dismiss: () -> Unit, confirm: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text("Ring the whole family?") },
+        text = { Text("All $count phones will ring at the same time.") },
+        confirmButton = { TextButton({ dismiss(); confirm() }) { Text("Ring everyone") } },
+        dismissButton = { TextButton(dismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
 private fun KeypadTab(app: FamilyTalkApp) {
     var number by rememberSaveable { mutableStateOf("") }
     var message by rememberSaveable { mutableStateOf<String?>(null) }
+    var ringAll by rememberSaveable { mutableStateOf(false) }
     val roster by app.family.roster.collectAsStateWithLifecycle()
+    if (ringAll) {
+        val everyone = roster?.members?.filter { it.id != app.family.myId }.orEmpty()
+        ConfirmRingAll(everyone.size, { ringAll = false }) { app.calls.call(everyone, false) }
+    }
     val data by app.family.data.collectAsStateWithLifecycle()
     val sipUi by app.sip.ui.collectAsStateWithLifecycle()
     val me = roster?.byId(app.family.myId)
     val preview = if (number.isEmpty()) null else DialPlan.resolve(number, roster, data.sip, me?.ext)
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(number.ifEmpty { " " }, style = MaterialTheme.typography.headlineMedium, fontFamily = FontFamily.Monospace, fontSize = 34.sp, maxLines = 1)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(number.ifEmpty { " " }, style = MaterialTheme.typography.headlineMedium.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr), fontFamily = FontFamily.Monospace, fontSize = 34.sp, maxLines = 1)
         Text(
             when (preview) {
                 null -> "101–199 family · 0 everyone · 9 or + outside · *43 echo test"
                 is DialTarget.FamilyMember -> "${preview.member.name} · end-to-end encrypted"
                 DialTarget.Everyone -> "Ring the whole family"
                 DialTarget.EchoTest -> "Test your microphone and connection"
-                is DialTarget.External -> "Outside call via SIP · ${if (sipUi.registered) "ready" else sipUi.registration} · not end-to-end"
+                is DialTarget.External -> "Outside call via SIP · ${if (sipUi.registered) "ready" else "SIP account not connected"} · not end-to-end encrypted"
                 is DialTarget.Invalid -> preview.reason
             },
             style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, minLines = 2,
@@ -269,9 +306,9 @@ private fun KeypadTab(app: FamilyTalkApp) {
                 val others = roster?.members?.filter { it.id != app.family.myId }.orEmpty()
                 when (val t = DialPlan.resolve(number, roster, data.sip, me?.ext)) {
                     is DialTarget.FamilyMember -> app.calls.call(listOf(t.member), false)
-                    DialTarget.Everyone -> app.calls.call(others, false)
+                    DialTarget.Everyone -> ringAll = true
                     DialTarget.EchoTest -> app.calls.echoTest()
-                    is DialTarget.External -> if (!app.sip.call(t.uri)) message = "SIP account is not ready (${sipUi.registration})" else
+                    is DialTarget.External -> if (!app.sip.call(t.uri)) message = "Your SIP account isn't connected yet. Check Settings › SIP account." else
                         app.startActivity(android.content.Intent(app, CallActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                     is DialTarget.Invalid -> message = t.reason
                 }

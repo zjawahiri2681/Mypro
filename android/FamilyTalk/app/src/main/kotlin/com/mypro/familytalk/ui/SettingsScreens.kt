@@ -60,7 +60,7 @@ fun SettingsTab(app: FamilyTalkApp, nav: Nav) {
         ListItem(
             leadingContent = { Avatar(me?.name ?: "?", me?.color ?: 0) },
             headlineContent = { Text(me?.name ?: "") },
-            supportingContent = { Text("Extension ${me?.ext} · ${if (app.family.isAdmin) "Family admin" else "Member"} · key ${Bytes.b64(app.family.identity.public.signKeyBytes).take(8)}") },
+            supportingContent = { Text("Extension \u2066${me?.ext}\u2069 · ${if (app.family.isAdmin) "Family admin" else "Member"}") },
         )
         SectionTitle("Family")
         if (app.family.isAdmin) {
@@ -71,19 +71,29 @@ fun SettingsTab(app: FamilyTalkApp, nav: Nav) {
             Item(Icons.Filled.Person, "Family admin", roster?.admins?.joinToString { "${it.name} (${it.ext})" } ?: "") {}
         }
         SectionTitle("Outside calls")
-        Item(Icons.Filled.PhoneForwarded, "SIP account", if (data.sip == null) "Not set up — needed for phone numbers" else "${data.sip!!.identityUri} · ${sipUi.registration}") { nav.go(Screen.Sip) }
+        Item(Icons.Filled.PhoneForwarded, "SIP account", if (data.sip == null) "Not set up — needed for phone numbers" else "${data.sip!!.identityUri} · ${if (sipUi.registered) "Ready" else sipUi.registration}") { nav.go(Screen.Sip) }
         SectionTitle("Privacy")
+        val hasTurn = roster?.relay?.ice?.any { s -> s.urls.any { it.startsWith("turn") } } == true
         ListItem(
             leadingContent = { Icon(Icons.Filled.VpnLock, null) },
             headlineContent = { Text("Hide my IP address") },
-            supportingContent = { Text("Send call media through the TURN relay instead of directly. Needs a TURN server (Settings › Relay).") },
-            trailingContent = { Switch(data.relayOnly, { app.family.setRelayOnly(it) }) },
+            supportingContent = {
+                Text(if (hasTurn) "Send call media through your family's TURN server instead of directly to the other phone."
+                     else "Needs a TURN server. Ask the family admin to add one (Settings › Relay & TURN servers).")
+            },
+            trailingContent = { Switch(data.relayOnly && hasTurn, { app.family.setRelayOnly(it) }, enabled = hasTurn) },
         )
         ListItem(
             leadingContent = { Icon(Icons.Filled.Screenshot, null) },
             headlineContent = { Text("Block screenshots") },
             supportingContent = { Text("Also hides chats in the recent-apps view.") },
             trailingContent = { Switch(data.secureScreen, { app.family.setSecureScreen(it) }) },
+        )
+        ListItem(
+            leadingContent = { Icon(Icons.Filled.Info, null) },
+            headlineContent = { Text("Show message text in notifications") },
+            supportingContent = { Text("Off: notifications only say who wrote. Smart watches and other apps then can't read your messages.") },
+            trailingContent = { Switch(data.notifPreview, { app.family.setNotifPreview(it) }) },
         )
         Item(Icons.Filled.Info, "How FamilyTalk protects you", "Encryption, what servers can see, limits") { nav.go(Screen.Security) }
         SectionTitle("Danger zone")
@@ -108,6 +118,7 @@ private fun Item(icon: androidx.compose.ui.graphics.vector.ImageVector, title: S
     )
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun SipScreen(app: FamilyTalkApp, nav: Nav) {
     val data by app.family.data.collectAsStateWithLifecycle()
@@ -126,7 +137,7 @@ fun SipScreen(app: FamilyTalkApp, nav: Nav) {
     BackScaffold("SIP account", nav) {
         Text("Use any SIP provider or office/home PBX to call ordinary phone numbers (dial 9 or +) and SIP addresses. Status: ${sipUi.registration}",
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Calls through SIP are protected only up to your provider. They are not end-to-end encrypted like family calls.", color = Brand.Unverified)
+        Text("Calls through SIP are protected only up to your provider. They are not end-to-end encrypted like family calls.", color = trustWarn())
         OutlinedTextField(user, { user = it }, label = { Text("Username / extension") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(domain, { domain = it }, label = { Text("Domain (e.g. sip.provider.com)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(pass, { pass = it }, label = { Text("Password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
@@ -137,15 +148,15 @@ fun SipScreen(app: FamilyTalkApp, nav: Nav) {
         OutlinedTextField(port, { port = it.filter(Char::isDigit).take(5) }, label = { Text("Port (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
         Text("Transport", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { SipTransport.entries.forEach { t -> FilterChip(transport == t, { transport = t }, { Text(t.name) }) } }
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { SipTransport.entries.forEach { t -> FilterChip(transport == t, { transport = t }, { Text(t.name) }) } }
         Text("Voice encryption", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(media == MediaEncryption.SRTP_MANDATORY, { media = MediaEncryption.SRTP_MANDATORY }, { Text("SRTP required") })
             FilterChip(media == MediaEncryption.SRTP_OPTIONAL, { media = MediaEncryption.SRTP_OPTIONAL }, { Text("If available") })
             FilterChip(media == MediaEncryption.NONE, { media = MediaEncryption.NONE }, { Text("Off") })
         }
         draft.problems().forEach { Text("• $it", color = MaterialTheme.colorScheme.error) }
-        draft.warnings().forEach { Text("⚠ $it", color = Brand.Unverified) }
+        draft.warnings().forEach { Text("⚠ $it", color = trustWarn()) }
         Button({ app.family.setSip(draft); nav.back() }, Modifier.fillMaxWidth().height(52.dp), enabled = draft.problems().isEmpty()) { Text("Save and register") }
         if (cur != null) TextButton({ app.family.setSip(null); nav.back() }) { Text("Remove SIP account", color = MaterialTheme.colorScheme.error) }
     }
@@ -164,9 +175,9 @@ fun NetworkScreen(app: FamilyTalkApp, nav: Nav) {
     var turnPass by remember { mutableStateOf(turn?.credential ?: "") }
     val brokerOk = broker.startsWith("ssl://") || broker.startsWith("wss://")
     BackScaffold("Relay & TURN servers", nav) {
-        Text("The relay passes sealed envelopes between phones; TURN carries encrypted media when phones cannot reach each other directly. Neither can read anything. Running your own (see server/ in the project) also hides who talks to whom and when.",
+        Text("The relay passes sealed envelopes between phones; TURN carries encrypted media when phones cannot reach each other directly. Neither can read messages or hear calls. The default public relay can still see when your family's phones are online and active; running your own (see server/ in the project) keeps that private too. With a TURN server set, it is also used instead of Google's STUN.",
             color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("Changes are sent to every family phone.", color = Brand.Unverified)
+        Text("Changes are sent to every family phone.", color = trustWarn())
         OutlinedTextField(broker, { broker = it.trim() }, label = { Text("MQTT broker (ssl://host:8883)") }, singleLine = true, isError = !brokerOk, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(bUser, { bUser = it }, label = { Text("Broker username (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(bPass, { bPass = it }, label = { Text("Broker password (optional)") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
@@ -175,9 +186,15 @@ fun NetworkScreen(app: FamilyTalkApp, nav: Nav) {
         OutlinedTextField(turnPass, { turnPass = it }, label = { Text("TURN password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         Button({
             val ice = buildList {
-                add(IceServer(listOf("stun:stun.l.google.com:19302")))
                 val urls = turnUrl.split(',').map { it.trim() }.filter { it.startsWith("turn:") || it.startsWith("turns:") }
-                if (urls.isNotEmpty()) add(IceServer(urls, turnUser.ifBlank { null }, turnPass.ifBlank { null }))
+                if (urls.isNotEmpty()) {
+                    // Use your own server for STUN too, so no third party (e.g. Google) sees call IPs.
+                    val host = urls.first().substringAfter(':').substringBefore('?').substringBefore(':')
+                    add(IceServer(listOf("stun:$host:3478")))
+                    add(IceServer(urls, turnUser.ifBlank { null }, turnPass.ifBlank { null }))
+                } else {
+                    add(IceServer(listOf("stun:stun.l.google.com:19302")))
+                }
             }
             app.family.updateRelay(RelayConfig(broker, bUser.ifBlank { null }, bPass.ifBlank { null }, ice))
             nav.back()
@@ -191,10 +208,10 @@ fun SecurityInfoScreen(nav: Nav) {
     BackScaffold("How you're protected", nav) {
         listOf(
             "Your keys" to "Each phone makes its own keys and never shares the private part. Keys and chats are stored encrypted with a key locked in the phone's secure hardware. Nothing is backed up to the cloud.",
-            "Messages and files" to "Every message, file and call setup is encrypted for one recipient and signed by the sender (X25519 + ChaCha20-Poly1305 + Ed25519). The relay only sees scrambled data on random-looking addresses.",
-            "Calls" to "Voice and video go phone-to-phone (peer-to-peer) with DTLS-SRTP. The encryption keys are confirmed inside the signed messages, so no server can listen in. When a direct path is impossible, a TURN server forwards the still-encrypted media.",
-            "Who's in the family" to "Only an admin can add or remove people, and every phone checks the admin's signature. Compare safety numbers (tap the shield next to a name) to rule out impostors completely.",
-            "What servers can still see" to "The relay sees that some phones are online and roughly when they exchange messages, plus IP addresses. Use your own relay and \"Hide my IP address\" to reduce this.",
+            "Messages and files" to "Every message, file and call setup is encrypted for one recipient and signed by the sender (X25519 + ChaCha20-Poly1305 + Ed25519), then sealed again so the relay can't see who sent it or to which family it belongs. Keys rotate weekly and old ones are deleted after three weeks, so a phone stolen later can't unlock older recorded messages.",
+            "Calls" to "Voice and video go phone-to-phone (peer-to-peer) with DTLS-SRTP and fresh keys for every call. The encryption keys are confirmed inside the signed messages, so no server can listen in. When a direct path is impossible, a TURN server forwards the still-encrypted media. In a conference you only ever send audio/video to people who accepted the call.",
+            "Who's in the family" to "Only an admin can add or remove people, every phone checks the admin's signature, and every change is written into the family chat. Each new person must be approved on the admin's screen. Comparing safety numbers (tap the shield next to a name) proves you are talking to that person's phone — but an admin can still add someone, so keep admin phones locked and only make trusted adults admins.",
+            "What servers can still see" to "The relay sees an anonymous inbox address per phone, when messages arrive, rough sizes, and IP addresses. Unless the admin sets your own TURN/STUN server, Google's STUN server sees your IP address when a call starts. Use your own server (Settings › Relay & TURN servers) and \"Hide my IP address\" to reduce this.",
             "Outside calls (SIP / phone numbers)" to "Calls to normal phone numbers go through your SIP provider and the phone network. They are encrypted to the provider at best — never end-to-end.",
             "What FamilyTalk can't protect against" to "A phone that is unlocked in someone else's hands, or infected with spyware, can see everything shown on it. Keep your phones updated and locked.",
         ).forEach { (t, b) ->

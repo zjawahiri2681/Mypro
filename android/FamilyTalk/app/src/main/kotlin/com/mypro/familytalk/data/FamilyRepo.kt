@@ -15,6 +15,9 @@ import com.mypro.familytalk.core.family.RosterCodec
 import com.mypro.familytalk.core.family.RosterRejected
 import com.mypro.familytalk.core.family.SignedRoster
 import com.mypro.familytalk.core.protocol.JoinRequest
+import com.mypro.familytalk.core.protocol.PrekeyAnnounce
+import com.mypro.familytalk.core.crypto.Prekeys
+import com.mypro.familytalk.core.crypto.SignedPrekey
 import com.mypro.familytalk.core.protocol.Payload
 import com.mypro.familytalk.core.protocol.Ping
 import com.mypro.familytalk.core.protocol.Pong
@@ -58,6 +61,13 @@ class FamilyRepo(private val context: Context) {
     val handlers = mutableListOf<(Incoming) -> Boolean>()
 
     private var messenger: Messenger? = null
+    private val startedAt = System.currentTimeMillis()
+
+    /** Join requests waiting for the admin's "Allow" on screen. */
+    val pendingJoins = MutableStateFlow<List<PendingJoin>>(emptyList())
+
+    /** Called with (old, new) roster so the chat can record "X joined / was removed". */
+    var onRosterChanged: (Roster?, Roster) -> Unit = { _, _ -> }
     private var relay: MqttRelay? = null
     private val guard = ReplayGuard().also { it.restore(_data.value.replay) }
 
@@ -131,8 +141,10 @@ class FamilyRepo(private val context: Context) {
     }
 
     private fun publishRoster(signed: SignedRoster, extra: List<PublicIdentity> = emptyList()) {
-        val next = RosterCodec.verify(signed, roster.value, null)
+        val before = roster.value
+        val next = RosterCodec.verify(signed, before, null)
         save { it.copy(roster = signed) }
+        onRosterChanged(before, next)
         (next.members.map { it.identity } + extra).filter { it.memberId != myId }.forEach { send(it, RosterUpdate(signed)) }
         if (relayConfigChanged(next)) connect()
     }
@@ -143,6 +155,7 @@ class FamilyRepo(private val context: Context) {
     fun setSip(account: SipAccount?) = save { it.copy(sip = account) }
     fun setRelayOnly(on: Boolean) = save { it.copy(relayOnly = on) }
     fun setSecureScreen(on: Boolean) = save { it.copy(secureScreen = on) }
+    fun setNotifPreview(on: Boolean) = save { it.copy(notifPreview = on) }
     fun markVerified(memberId: String, verified: Boolean) =
         save { it.copy(verified = if (verified) it.verified + memberId else it.verified - memberId) }
 
@@ -168,19 +181,48 @@ class FamilyRepo(private val context: Context) {
         val cfg = roster.value?.relay ?: d.joinRelay ?: RelayConfig()
         messenger?.stop()
         val r = MqttRelay(cfg.broker, d.clientId, cfg.brokerUser, cfg.brokerPassword) { Log.i(TAG, it) }
-        val m = Messenger(identity, { familyId }, ::trusted, r, guard, log = { Log.i(TAG, it) })
+        val m = Messenger(
+            identity, { familyId }, ::trusted, r, guard, log = { Log.i(TAG, it) },
+            signalNotBefore = startedAt - 5_000,
+            myPrekeys = { id -> _data.value.prekeys.firstOrNull { it.id == id } },
+            peerPrekey = { member -> _data.value.peerPrekeys[member] },
+        )
         m.onIncoming = ::dispatch
         relay = r; messenger = m; connectedWith = cfg
         m.start()
         scope.launch {
             r.connected.collect { up ->
                 relayConnected.value = up
-                if (up) m.flushOutbox()
+                if (up) { m.flushOutbox(); maintainPrekeys() }
             }
         }
     }
 
     fun disconnect() { messenger?.stop(); messenger = null }
+
+    /** Weekly prekey rotation; old private prekeys are deleted after three weeks. */
+    @Synchronized
+    fun maintainPrekeys(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val d = _data.value
+        val rotate = force || Prekeys.needsRotation(d.prekeys, now)
+        val current = if (rotate) Prekeys.generate(identity, now) else null
+        val kept = Prekeys.prune(d.prekeys + listOfNotNull(current?.first), now)
+        if (rotate || kept.size != d.prekeys.size) save { it.copy(prekeys = kept) }
+        if (current != null) announcePrekey(current.second)
+    }
+
+    private fun announcePrekey(signed: SignedPrekey) {
+        save { it.copy(myPrekey = signed) }
+        roster.value?.members?.filter { it.id != myId }?.forEach { send(it.identity, PrekeyAnnounce(signed)) }
+    }
+
+    /** Re-sends our current prekey to one member (e.g. someone who just joined). */
+    private fun announcePrekeyTo(member: PublicIdentity) {
+        val newest = _data.value.prekeys.maxByOrNull { it.created } ?: return
+        val signed = _data.value.myPrekey?.takeIf { it.id == newest.id } ?: return
+        send(member, PrekeyAnnounce(signed))
+    }
 
     fun send(to: PublicIdentity, payload: Payload) {
         messenger?.send(to, payload) ?: Log.w(TAG, "not connected; dropped ${payload::class.simpleName}")
@@ -196,9 +238,13 @@ class FamilyRepo(private val context: Context) {
             is RosterUpdate -> onRoster(p)
             is JoinRequest -> onJoinRequest(msg.from, p)
             is Ping -> send(msg.from, Pong(p.at))
+            is PrekeyAnnounce -> if (msg.fromKnownMember && p.prekey.verify(msg.from)) {
+                val prev = _data.value.peerPrekeys[msg.from.memberId]
+                if (prev == null || p.prekey.created > prev.created) save { it.copy(peerPrekeys = it.peerPrekeys + (msg.from.memberId to p.prekey)) }
+            }
             else -> handlers.firstOrNull { it(msg) }
         }
-        if (guard.snapshot().size % 64 == 0) save { it.copy(replay = guard.snapshot()) }
+        if (Messenger.isDurable(msg.payload)) save { it.copy(replay = guard.snapshot()) }
     }
 
     private fun onRoster(update: RosterUpdate) {
@@ -207,9 +253,17 @@ class FamilyRepo(private val context: Context) {
             val next = RosterCodec.verify(update.roster, roster.value, if (roster.value == null) d.pinnedAdmin else null)
             if (d.familyId != null && next.familyId != d.familyId) return
             val stillIn = next.byId(myId) != null
-            save { it.copy(roster = update.roster, familyId = next.familyId, joinRelay = null, removed = !stillIn) }
+            val old = roster.value
+            save { d2 ->
+                d2.copy(roster = update.roster, familyId = next.familyId, joinRelay = null, removed = !stillIn,
+                    peerPrekeys = d2.peerPrekeys.filterKeys { next.byId(it) != null },
+                    verified = d2.verified.filter { next.byId(it) != null }.toSet())
+            }
             if (relayConfigChanged(next)) connect()
-            events.tryEmit(if (stillIn) "Family directory updated" else "You were removed from the family")
+            if (!stillIn) { events.tryEmit("You were removed from the family"); return }
+            onRosterChanged(old, next)
+            if (old == null) maintainPrekeys(force = true)
+            else next.members.filter { old.byId(it.id) == null && it.id != myId }.forEach { announcePrekeyTo(it.identity) }
         } catch (e: RosterRejected) {
             Log.w(TAG, "roster rejected: ${e.message}")
         }
@@ -217,15 +271,33 @@ class FamilyRepo(private val context: Context) {
 
     private fun onJoinRequest(from: PublicIdentity, req: JoinRequest) {
         if (!isAdmin) return
+        val invite = _data.value.invites.firstOrNull { it.inviteId == req.inviteId } ?: return
+        if (req.identity != from || System.currentTimeMillis() > invite.expiresAt) return
+        if (!invite.checkProof(req.name, from, req.proof)) return
+        if (pendingJoins.value.any { it.identity == from }) return
+        val safety = com.mypro.familytalk.core.crypto.SafetyNumber.forPair(identity.public, from)
+        pendingJoins.update { it + PendingJoin(req.name, from, req, safety) }
+        events.tryEmit("${req.name.take(40)} wants to join the family")
+    }
+
+    /** The admin tapped Allow (true) or Deny (false) on a pending join. */
+    fun decideJoin(p: PendingJoin, allow: Boolean) {
+        pendingJoins.update { list -> list.filter { it.identity != p.identity } }
+        if (!allow) {
+            save { d -> d.copy(invites = d.invites.filter { it.inviteId != p.request.inviteId }) }
+            return
+        }
+        val from = p.identity
+        val req = p.request
         val r = roster.value ?: return
         val invite = _data.value.invites.firstOrNull { it.inviteId == req.inviteId } ?: return
-        if (req.identity != from) return
         try {
             val signed = FamilyAdmin(identity).admit(r, invite, req.name, from, req.proof)
             save { d -> d.copy(invites = d.invites.filter { it.inviteId != invite.inviteId }) }
             publishRoster(signed)
             val m = signed.roster().byId(from.memberId)
             events.tryEmit("${m?.name} joined as extension ${m?.ext}")
+            announcePrekeyTo(from)
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "join rejected: ${e.message}")
         }

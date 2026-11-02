@@ -33,6 +33,9 @@ class SipEngine(private val context: Context) {
     var onEnded: () -> Unit = {}
 
     private var core: Core? = null
+    private var localConference: org.linphone.core.Conference? = null
+    /** SDES-SRTP keys travel inside SIP signalling, so voice is only protected when signalling is TLS. */
+    private var tlsSignalling = false
     private val connectedAt = mutableMapOf<Call, Long>()
 
     val busy: Boolean get() = (core?.callsNb ?: 0) > 0
@@ -58,7 +61,7 @@ class SipEngine(private val context: Context) {
             if (state == Call.State.IncomingReceived) {
                 ui.value.calls.firstOrNull { it.key == key(call) }?.let(onIncoming)
             }
-            if ((state == Call.State.Released) && core.callsNb == 0) onEnded()
+            if ((state == Call.State.Released) && core.callsNb == 0) { localConference = null; onEnded() }
         }
     }
 
@@ -66,8 +69,12 @@ class SipEngine(private val context: Context) {
         if (account == null || !account.enabled || account.problems().isNotEmpty()) { shutdown(); _ui.value = SipUi(); return }
         val c = core ?: Factory.instance().createCore(null, null, context).also {
             it.addListener(listener)
+            // Always check the provider's TLS certificate and host name.
+            it.verifyServerCertificates(true)
+            it.verifyServerCn(true)
             core = it
         }
+        tlsSignalling = account.transport == SipTransport.TLS
         c.clearAccounts()
         c.clearAllAuthInfo()
         val f = Factory.instance()
@@ -124,11 +131,12 @@ class SipEngine(private val context: Context) {
     fun mergeAll() {
         val c = core ?: return
         if (c.callsNb < 2) return
-        val conf = c.conference ?: run {
+        val conf = localConference ?: run {
             val p = c.createConferenceParams(null)
             p.isVideoEnabled = false
             c.createConferenceWithParams(p)
         } ?: return
+        localConference = conf
         c.calls.forEach { call -> if (call.conference == null) conf.addParticipant(call) }
         refresh()
     }
@@ -157,11 +165,11 @@ class SipEngine(private val context: Context) {
                     },
                     incoming = call.dir == Call.Dir.Incoming,
                     connectedAt = connectedAt[call],
-                    encrypted = call.currentParams.mediaEncryption != LinphoneEncryption.None,
+                    encrypted = tlsSignalling && call.currentParams.mediaEncryption != LinphoneEncryption.None,
                     paused = call.state == Call.State.Paused,
                 )
             },
-            conference = c.conference != null,
+            conference = localConference != null && c.callsNb >= 2,
             micMuted = !c.isMicEnabled,
         )
     }

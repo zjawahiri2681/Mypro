@@ -55,6 +55,9 @@ class Vault(context: Context) {
         return c.doFinal(b, 13, b.size - 13)
     }
 
+    @Synchronized
+    fun delete(name: String) { File(dir, name).delete() }
+
     /** Destroys everything: keys, family, chats. Used by "Leave family / wipe". */
     fun wipe() {
         dir.deleteRecursively()

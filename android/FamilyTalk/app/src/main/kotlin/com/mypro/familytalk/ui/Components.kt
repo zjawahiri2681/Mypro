@@ -49,7 +49,7 @@ fun Avatar(name: String, color: Int, size: Dp = 48.dp) {
 @Composable
 fun ExtChip(ext: Int) {
     Text(
-        "Ext $ext",
+        "Ext \u2066$ext\u2069",
         Modifier.clip(RoundedCornerShape(6.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(horizontal = 8.dp, vertical = 2.dp),
         color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.labelLarge, fontSize = 13.sp,
     )
@@ -59,23 +59,24 @@ fun ExtChip(ext: Int) {
 @Composable
 fun TrustBadge(verified: Boolean, compact: Boolean = false) {
     Row(verticalAlignment = Alignment.CenterVertically) {
+        val tint = if (verified) trustOk() else trustWarn()
         Icon(
             if (verified) Icons.Filled.VerifiedUser else Icons.Filled.GppMaybe,
-            contentDescription = if (verified) "Verified" else "Not verified yet",
-            tint = if (verified) Brand.Verified else Brand.Unverified, modifier = Modifier.size(16.dp),
+            // When the word is shown, the icon is decorative (TalkBack reads the word once).
+            contentDescription = if (compact) (if (verified) "Verified" else "Not verified yet") else null,
+            tint = tint, modifier = Modifier.size(18.dp),
         )
         if (!compact) {
             Spacer(Modifier.width(4.dp))
-            Text(if (verified) "Verified" else "Not verified", style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp,
-                color = if (verified) Brand.Verified else Brand.Unverified)
+            Text(if (verified) "Verified" else "Not verified", style = MaterialTheme.typography.bodyMedium, fontSize = 14.sp, color = tint)
         }
     }
 }
 
 @Composable
-fun RoundAction(icon: ImageVector, label: String, color: Color, onClick: () -> Unit, size: Dp = 64.dp, contentColor: Color = Color.White) {
+fun RoundAction(icon: ImageVector, label: String, color: Color, onClick: () -> Unit, size: Dp = 64.dp, contentColor: Color = Color.White, modifier: Modifier = Modifier) {
     FilledIconButton(
-        onClick = onClick, modifier = Modifier.size(size),
+        onClick = onClick, modifier = modifier.size(size),
         colors = IconButtonDefaults.filledIconButtonColors(containerColor = color, contentColor = contentColor),
     ) { Icon(icon, contentDescription = label, modifier = Modifier.size(size * 0.45f)) }
 }
@@ -95,8 +96,8 @@ fun renderQr(text: String, sizePx: Int = 640): Bitmap? = runCatching {
 
 @Composable
 fun SectionTitle(text: String) {
-    Text(text.uppercase(), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp,
-        letterSpacing = 1.sp, modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 6.dp))
+    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp,
+        modifier = Modifier.padding(start = 16.dp, top = 20.dp, bottom = 6.dp))
 }
 
 fun formatDuration(sec: Long): String = if (sec >= 3600) "%d:%02d:%02d".format(sec / 3600, sec % 3600 / 60, sec % 60) else "%d:%02d".format(sec / 60, sec % 60)

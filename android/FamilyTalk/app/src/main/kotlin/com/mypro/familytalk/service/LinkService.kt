@@ -15,8 +15,8 @@ import kotlinx.coroutines.launch
 
 /**
  * Foreground service that keeps the encrypted relay connection open so family calls
- * ring even when the app is closed. No Google push (FCM) is used: nothing about who
- * calls whom ever touches Google's servers.
+ * ring even when the app is closed. No Google push (FCM) is used, so Google's push
+ * service never learns when family members message or call each other.
  */
 class LinkService : LifecycleService() {
     private var inCall = false

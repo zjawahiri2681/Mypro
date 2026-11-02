@@ -29,6 +29,27 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     init {
         family.handlers += ::handle
+        family.onRosterChanged = ::recordRosterChange
+        // Decrypted copies made for "open file" never outlive the app process.
+        File(context.cacheDir, "open").deleteRecursively()
+    }
+
+    /** Visible, permanent record in the family chat of every change to who is in the family. */
+    private fun recordRosterChange(old: com.mypro.familytalk.core.family.Roster?, new: com.mypro.familytalk.core.family.Roster) {
+        if (old == null) return
+        val lines = buildList {
+            new.members.filter { old.byId(it.id) == null }.forEach { add("${it.name} joined the family (ext ${it.ext}). Their safety number is not verified yet.") }
+            old.members.filter { new.byId(it.id) == null }.forEach { add("${it.name} (ext ${it.ext}) was removed from the family.") }
+            new.members.forEach { m ->
+                val o = old.byId(m.id) ?: return@forEach
+                if (o.role != m.role) add("${m.name} is now ${if (m.role == com.mypro.familytalk.core.family.Role.ADMIN) "an admin" else "a member"}.")
+                if (o.name != m.name) add("${o.name} was renamed to ${m.name}.")
+            }
+            if (old.relay != new.relay) add("The family's relay/TURN servers were changed by an admin.")
+        }
+        if (lines.isEmpty()) return
+        val now = System.currentTimeMillis()
+        mutate { h -> h.copy(chats = h.chats + lines.mapIndexed { i, t -> ChatMsg("sys-$now-$i", FAMILY_CONV, "system", now + i, text = t, status = MsgStatus.READ, system = true) }) }
     }
 
     private fun load(): History = runCatching {
@@ -78,7 +99,10 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     fun addCall(entry: CallLogEntry) = mutate { it.copy(calls = it.calls + entry) }
 
-    fun deleteConversation(conv: String) = mutate { h -> h.copy(chats = h.chats.filter { it.conv != conv }, unread = h.unread - conv) }
+    fun deleteConversation(conv: String) = mutate { h ->
+        h.chats.filter { it.conv == conv }.mapNotNull { it.file?.localPath }.forEach(::deleteFile)
+        h.copy(chats = h.chats.filter { it.conv != conv }, unread = h.unread - conv)
+    }
 
     private fun handle(m: Incoming): Boolean {
         if (!m.fromKnownMember) return false
@@ -98,7 +122,10 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
             }
             is FileOffer -> {
                 val asm = runCatching { FileTransfer.Assembly(p) }.getOrNull() ?: return true
-                synchronized(assemblies) { assemblies[p.fileId] = from to asm }
+                synchronized(assemblies) {
+                    if (assemblies.values.count { it.first == from } >= 3) return true // at most 3 files at once per sender
+                    assemblies[p.fileId] = from to asm
+                }
                 val conv = if (p.group) FAMILY_CONV else from
                 receive(ChatMsg(p.fileId, conv, from, p.sentAt, file = FileInfo(FileTransfer.sanitizeName(p.name), p.mime, p.size), status = MsgStatus.RECEIVED))
             }
@@ -142,12 +169,22 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
         if (!visible) onNewMessage(msg, name)
     }
 
+    /** Files are kept inside the encrypted [Vault]; the returned handle is "vault:<entry>". */
     private fun store(fileId: String, name: String, bytes: ByteArray): String {
-        val dir = File(context.filesDir, "received/${fileId.filter { it.isLetterOrDigit() }}").apply { mkdirs() }
-        val f = File(dir, FileTransfer.sanitizeName(name))
-        f.writeBytes(bytes)
-        return f.absolutePath
+        val entry = "file-" + fileId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        vault.write(entry, bytes)
+        return "vault:$entry"
     }
+
+    /** Decrypts a stored file into a private cache folder so another app can open it. */
+    fun exportForViewing(handle: String, name: String): File? {
+        if (!handle.startsWith("vault:")) return File(handle).takeIf { it.exists() }
+        val bytes = runCatching { vault.read(handle.removePrefix("vault:")) }.getOrNull() ?: return null
+        val dir = File(context.cacheDir, "open").apply { mkdirs() }
+        return File(dir, FileTransfer.sanitizeName(name)).also { it.writeBytes(bytes) }
+    }
+
+    fun deleteFile(handle: String) { if (handle.startsWith("vault:")) vault.delete(handle.removePrefix("vault:")) }
 
     private companion object {
         const val FILE = "history.v1"

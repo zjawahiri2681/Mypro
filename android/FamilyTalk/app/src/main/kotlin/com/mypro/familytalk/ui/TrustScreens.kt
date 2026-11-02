@@ -77,16 +77,24 @@ fun VerifyScreen(app: FamilyTalkApp, nav: Nav, memberId: String) {
         Text("When you are together, open this screen on both phones. Scan each other's code, or read the numbers aloud. If they match, nobody can be listening in between you.",
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { QrImage("FTSN:$number", 220.dp) }
-        Text(SafetyNumber.format(number).chunked(18).joinToString("\n"), fontFamily = FontFamily.Monospace, fontSize = 20.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), lineHeight = 30.sp)
+        Text(SafetyNumber.format(number).chunked(18).joinToString("\n"), style = androidx.compose.ui.text.TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr), fontFamily = FontFamily.Monospace, fontSize = 20.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(), lineHeight = 30.sp)
         Button({ scan.launch(scanOptions().setPrompt("Scan ${m.name}'s safety code")) }, Modifier.fillMaxWidth().height(52.dp)) {
             Icon(Icons.Filled.QrCodeScanner, null); Spacer(Modifier.size(8.dp)); Text("Scan their code")
         }
-        OutlinedButton({ app.family.markVerified(memberId, !verified) }, Modifier.fillMaxWidth()) {
-            Text(if (verified) "Clear verification" else "Numbers match — mark verified")
+        var confirmManual by remember { mutableStateOf(false) }
+        OutlinedButton({ if (verified) app.family.markVerified(memberId, false) else confirmManual = true }, Modifier.fillMaxWidth()) {
+            Text(if (verified) "Clear verification" else "We read the numbers aloud — they match")
         }
+        if (confirmManual) AlertDialog(
+            onDismissRequest = { confirmManual = false },
+            title = { Text("Did all 60 digits match?") },
+            text = { Text("Only confirm if you compared every group of numbers with ${m.name}, in person or on a video call where you could see and hear them.") },
+            confirmButton = { TextButton({ app.family.markVerified(memberId, true); confirmManual = false }) { Text("Yes, all match") } },
+            dismissButton = { TextButton({ confirmManual = false }) { Text("Cancel") } },
+        )
         result?.let {
-            Text(if (it) "✔ Match. ${m.name} is verified." else "✖ The codes do NOT match. Don't trust this connection until you've checked with the family admin.",
-                color = if (it) Brand.Verified else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleMedium)
+            Text(if (it) "Match. ${m.name} is verified." else "The codes do not match. First check that each phone shows the other person's screen (not your own). If they still differ, don't trust this connection and tell the family admin.",
+                color = if (it) trustOk() else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -105,20 +113,20 @@ fun InviteScreen(app: FamilyTalkApp, nav: Nav) {
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 QrImage(code!!, 280.dp)
                 Text("On their phone: install FamilyTalk › Join with invite QR.", textAlign = TextAlign.Center)
-                Text("Keep this screen open until they appear in the family list.", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-                TextButton({
-                    ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, code), "Send invite code"))
-                }) { Icon(Icons.Filled.Share, null); Spacer(Modifier.size(6.dp)); Text("Send code instead (less safe)") }
-                Text("Only send the code through a channel you trust: whoever has it can join until it is used.", fontSize = 12.sp, color = Brand.Unverified, textAlign = TextAlign.Center)
+                Text("Keep this screen open. When they scan it, you'll be asked to allow them — check the number on their screen matches.", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+                Text("The invite can only be shown, not sent: a code sent through another app could be copied by that app.", fontSize = 14.sp, color = trustWarn(), textAlign = TextAlign.Center)
             }
         }
     }
 }
 
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun MembersScreen(app: FamilyTalkApp, nav: Nav) {
     val roster by app.family.roster.collectAsStateWithLifecycle()
     var confirm by remember { mutableStateOf<String?>(null) }
+    var rename by remember { mutableStateOf<String?>(null) }
+    var newName by remember { mutableStateOf("") }
     BackScaffold("Manage family", nav) {
         roster?.members?.sortedBy { it.ext }?.forEach { m ->
             Card {
@@ -126,16 +134,26 @@ fun MembersScreen(app: FamilyTalkApp, nav: Nav) {
                     leadingContent = { Avatar(m.name, m.color) },
                     headlineContent = { Text(m.name + if (m.id == app.family.myId) " (you)" else "") },
                     supportingContent = { Text("Ext ${m.ext} · ${if (m.role == Role.ADMIN) "Admin" else "Member"}") },
-                    trailingContent = {
-                        if (m.id != app.family.myId) Row {
-                            TextButton({ app.family.setRole(m.id, if (m.role == Role.ADMIN) Role.MEMBER else Role.ADMIN) }) { Text(if (m.role == Role.ADMIN) "Make member" else "Make admin") }
-                            TextButton({ confirm = m.id }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
-                        }
-                    },
                 )
+                androidx.compose.foundation.layout.FlowRow(Modifier.padding(start = 8.dp, bottom = 8.dp)) {
+                    TextButton({ rename = m.id; newName = m.name }) { Text("Rename") }
+                    if (m.id != app.family.myId) {
+                        TextButton({ app.family.setRole(m.id, if (m.role == Role.ADMIN) Role.MEMBER else Role.ADMIN) }) { Text(if (m.role == Role.ADMIN) "Make member" else "Make admin") }
+                        TextButton({ confirm = m.id }) { Text("Remove", color = MaterialTheme.colorScheme.error) }
+                    }
+                }
             }
         }
         Text("Lost phone? Remove it here straight away. It will stop receiving calls and messages from everyone.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    rename?.let { id ->
+        AlertDialog(
+            onDismissRequest = { rename = null },
+            title = { Text("Rename") },
+            text = { OutlinedTextField(newName, { newName = it.take(40) }, singleLine = true) },
+            confirmButton = { TextButton({ if (newName.isNotBlank()) app.family.renameMember(id, newName); rename = null }) { Text("Save") } },
+            dismissButton = { TextButton({ rename = null }) { Text("Cancel") } },
+        )
     }
     confirm?.let { id ->
         AlertDialog(

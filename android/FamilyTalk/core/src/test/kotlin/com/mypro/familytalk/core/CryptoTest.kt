@@ -67,3 +67,35 @@ class CryptoTest {
         assertEquals(12, SafetyNumber.format(ab).split(" ").size)
     }
 }
+
+class PrekeyTest {
+    private val alice = IdentityKeys.generate()
+    private val bob = IdentityKeys.generate()
+
+    @Test fun prekeyMessagesNeedThePrekeyAndBecomeUnreadableWhenItIsDeleted() {
+        val (priv, signed) = com.mypro.familytalk.core.crypto.Prekeys.generate(bob)
+        kotlin.test.assertTrue(signed.verify(bob.public))
+        kotlin.test.assertFalse(signed.verify(alice.public))
+        val env = Sealed.seal(Bytes.utf8("old secret"), "fam", alice, bob.public, prekey = signed)
+        assertContentEquals(Bytes.utf8("old secret"), Sealed.open(env, bob, alice.public) { if (it == priv.id) priv else null })
+        // After rotation + pruning the private prekey is gone: even Bob's identity key alone cannot open it.
+        assertFailsWith<SealException> { Sealed.open(env, bob, alice.public) { null } }
+        // Tampering with the prekey id is caught by the signature.
+        assertFailsWith<SealException> { Sealed.open(env.copy(pk = null), bob, alice.public) { priv } }
+    }
+
+    @Test fun rotationAndPruning() {
+        val P = com.mypro.familytalk.core.crypto.Prekeys
+        val (k1, _) = P.generate(bob, now = 0)
+        val (k2, _) = P.generate(bob, now = P.ROTATE_MS)
+        kotlin.test.assertTrue(P.needsRotation(listOf(k1), now = P.ROTATE_MS))
+        kotlin.test.assertFalse(P.needsRotation(listOf(k1, k2), now = P.ROTATE_MS + 1))
+        assertEquals(listOf(k2), P.prune(listOf(k1, k2), now = P.KEEP_MS + 1))
+        assertEquals(listOf(k2), P.prune(listOf(k2), now = 100 * P.KEEP_MS)) // newest is always kept
+    }
+
+    @Test fun forgedPrekeyRejected() {
+        val (_, signed) = com.mypro.familytalk.core.crypto.Prekeys.generate(bob)
+        kotlin.test.assertFalse(signed.copy(pub = Bytes.b64(ByteArray(32) { 9 })).verify(bob.public))
+    }
+}

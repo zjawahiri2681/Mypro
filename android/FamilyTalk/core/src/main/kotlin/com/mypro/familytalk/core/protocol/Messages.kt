@@ -55,6 +55,9 @@ data class FileChunk(val fileId: String, val index: Int, val data: String) : Pay
 @Serializable @SerialName("join")
 data class JoinRequest(val name: String, val identity: PublicIdentity, val inviteId: String, val proof: String) : Payload
 
+/** A member's newest signed prekey, sent to every other member when it rotates. */
+@Serializable @SerialName("prekey") data class PrekeyAnnounce(val prekey: com.mypro.familytalk.core.crypto.SignedPrekey) : Payload
+
 @Serializable @SerialName("ping") data class Ping(val at: Long) : Payload
 @Serializable @SerialName("pong") data class Pong(val at: Long) : Payload
 

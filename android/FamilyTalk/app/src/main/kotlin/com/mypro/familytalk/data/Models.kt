@@ -1,6 +1,8 @@
 package com.mypro.familytalk.data
 
+import com.mypro.familytalk.core.crypto.PrivatePrekey
 import com.mypro.familytalk.core.crypto.PublicIdentity
+import com.mypro.familytalk.core.crypto.SignedPrekey
 import com.mypro.familytalk.core.family.Invite
 import com.mypro.familytalk.core.family.RelayConfig
 import com.mypro.familytalk.core.family.SignedRoster
@@ -29,7 +31,18 @@ data class AppData(
     val secureScreen: Boolean = true,
     val clientId: String = "",
     val replay: Map<String, Long> = emptyMap(),
+    /** Our private prekeys (deleted after 3 weeks for forward secrecy). */
+    val prekeys: List<PrivatePrekey> = emptyList(),
+    /** Newest verified prekey of each family member. */
+    val peerPrekeys: Map<String, SignedPrekey> = emptyMap(),
+    /** The signed public half of our newest prekey, re-sent to members who join later. */
+    val myPrekey: SignedPrekey? = null,
+    /** Show message text in notifications (off: "New family message" only). */
+    val notifPreview: Boolean = false,
 )
+
+/** A join request waiting for the admin to approve it on screen. */
+data class PendingJoin(val name: String, val identity: PublicIdentity, val request: com.mypro.familytalk.core.protocol.JoinRequest, val safety: String)
 
 @Serializable
 data class FileInfo(val name: String, val mime: String, val size: Long, val localPath: String? = null, val progress: Float = 0f)

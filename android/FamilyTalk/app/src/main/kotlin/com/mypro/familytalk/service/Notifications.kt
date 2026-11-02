@@ -49,9 +49,9 @@ object Notifications {
     )
 
     fun link(ctx: Context, connected: Boolean) = NotificationCompat.Builder(ctx, CH_LINK)
-        .setSmallIcon(R.drawable.ic_launcher_foreground)
+        .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(if (connected) "Family link active" else "Connecting to family...")
-        .setContentText("End-to-end encrypted")
+        .setContentText(if (connected) "Ready for calls and messages" else "Waiting for internet")
         .setOngoing(true)
         .setPriority(NotificationCompat.PRIORITY_MIN)
         .setContentIntent(open(ctx, MainActivity::class.java, 10))
@@ -63,14 +63,14 @@ object Notifications {
     )
 
     fun incomingSip(ctx: Context, call: SipCallUi) {
-        val n = buildIncoming(ctx, call.remote, "SIP call (not end-to-end encrypted)",
+        val n = buildIncoming(ctx, call.remote, "SIP call · caller ID not verified · not end-to-end encrypted",
             open(ctx, CallActivity::class.java, 23) { putExtra(CallActivity.EXTRA_ACCEPT, "sip:" + call.key) }, action(ctx, CallActionReceiver.SIP_DECLINE, 24, call.key))
         post(ctx, ID_INCOMING, n)
     }
 
     private fun buildIncoming(ctx: Context, who: String, what: String, accept: PendingIntent, decline: PendingIntent) =
         NotificationCompat.Builder(ctx, CH_CALLS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setOngoing(true)
@@ -82,24 +82,25 @@ object Notifications {
 
     fun cancelIncoming(ctx: Context) = NotificationManagerCompat.from(ctx).cancel(ID_INCOMING)
 
-    fun message(ctx: Context, msg: ChatMsg, from: String) {
+    fun message(ctx: Context, msg: ChatMsg, from: String, preview: Boolean) {
         val text = msg.text ?: msg.file?.let { "Sent a file: ${it.name}" } ?: return
         val n = NotificationCompat.Builder(ctx, CH_MESSAGES)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(from)
-            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notification)
+            // By default only "New message from X" leaves the app (smart watches, notification history, other apps).
+            .setContentTitle(if (preview) from else "New message from $from")
+            .setContentText(if (preview) text else "Open FamilyTalk to read it")
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .setPublicVersion(NotificationCompat.Builder(ctx, CH_MESSAGES).setSmallIcon(R.drawable.ic_launcher_foreground).setContentTitle("New family message").build())
+            .setPublicVersion(NotificationCompat.Builder(ctx, CH_MESSAGES).setSmallIcon(R.drawable.ic_notification).setContentTitle("New family message").build())
             .setAutoCancel(true)
-            .setContentIntent(open(ctx, MainActivity::class.java, msg.conv.hashCode()) { putExtra("conv", msg.conv) })
+            .setContentIntent(open(ctx, MainActivity::class.java, msg.conv.hashCode()) { putExtra("conv", msg.conv); putExtra("token", MainActivity.intentToken) })
             .build()
         post(ctx, 1000 + (msg.conv.hashCode() and 0xffff), n)
     }
 
     fun missed(ctx: Context, who: String) {
         val n = NotificationCompat.Builder(ctx, CH_MISSED)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Missed call")
             .setContentText(who)
             .setCategory(NotificationCompat.CATEGORY_MISSED_CALL)

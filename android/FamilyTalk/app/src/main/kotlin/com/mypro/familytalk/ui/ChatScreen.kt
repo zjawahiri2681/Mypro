@@ -29,6 +29,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.DoneAll
@@ -122,12 +123,18 @@ fun ChatScreen(app: FamilyTalkApp, nav: Nav, conv: String) {
                     Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Lock, null, Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.size(6.dp))
-                        Text("Messages and files are end-to-end encrypted. Only your family's phones can read them.", fontSize = 12.sp,
+                        Text("Messages and files are end-to-end encrypted. Only your family's phones can read them.", fontSize = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
                     }
                 }
                 items(msgs, key = { it.from + it.id }) { m ->
-                    Bubble(m, mine = m.from == app.family.myId, sender = if (conv == FAMILY_CONV) roster?.byId(m.from)?.name else null) { f -> openFile(ctx, f) }
+                    if (m.system) {
+                        Text(m.text ?: "", Modifier.fillMaxWidth().padding(vertical = 4.dp), textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else Bubble(m, mine = m.from == app.family.myId, sender = if (conv == FAMILY_CONV) roster?.byId(m.from)?.name else null) { handle ->
+                        val f = m.file ?: return@Bubble
+                        app.chats.exportForViewing(handle, f.name)?.let { openFile(ctx, it) }
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -140,7 +147,7 @@ fun ChatScreen(app: FamilyTalkApp, nav: Nav, conv: String) {
 }
 
 @Composable
-private fun Bubble(m: ChatMsg, mine: Boolean, sender: String?, open: (File) -> Unit) {
+private fun Bubble(m: ChatMsg, mine: Boolean, sender: String?, open: (String) -> Unit) {
     val bg = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
     val fg = if (mine) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
     Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
@@ -153,7 +160,7 @@ private fun Bubble(m: ChatMsg, mine: Boolean, sender: String?, open: (File) -> U
             m.text?.let { Text(it, color = fg, style = MaterialTheme.typography.bodyLarge) }
             m.file?.let { f ->
                 Row(
-                    Modifier.clickable(enabled = f.localPath != null) { f.localPath?.let { open(File(it)) } }.padding(vertical = 4.dp),
+                    Modifier.clickable(enabled = f.localPath != null) { f.localPath?.let { open(it) } }.padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(Icons.Filled.Description, null, tint = fg)
@@ -166,12 +173,13 @@ private fun Bubble(m: ChatMsg, mine: Boolean, sender: String?, open: (File) -> U
                 if (f.localPath == null && m.status != MsgStatus.FAILED) LinearProgressIndicator({ f.progress }, Modifier.fillMaxWidth().padding(top = 4.dp))
             }
             Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                Text(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(m.at)), fontSize = 11.sp, color = fg.copy(alpha = 0.8f))
+                Text(DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(m.at)), fontSize = 12.sp, color = fg.copy(alpha = 0.85f))
                 if (mine) {
                     Spacer(Modifier.size(4.dp))
                     when (m.status) {
-                        MsgStatus.READ -> Icon(Icons.Filled.DoneAll, "Read", Modifier.size(14.dp), tint = Brand.SandLight)
-                        MsgStatus.DELIVERED -> Icon(Icons.Filled.DoneAll, "Delivered", Modifier.size(14.dp), tint = fg)
+                        // Different shapes (not just colours): read = filled circle tick.
+                        MsgStatus.READ -> Icon(Icons.Filled.CheckCircle, "Read", Modifier.size(15.dp), tint = fg)
+                        MsgStatus.DELIVERED -> Icon(Icons.Filled.DoneAll, "Delivered", Modifier.size(15.dp), tint = fg)
                         MsgStatus.FAILED -> Icon(Icons.Filled.ErrorOutline, "Failed", Modifier.size(14.dp), tint = fg)
                         else -> Icon(Icons.Filled.Done, "Sent", Modifier.size(14.dp), tint = fg)
                     }
@@ -188,7 +196,13 @@ private fun humanSize(b: Long) = when {
     else -> "$b B"
 }
 
+/** Types that would install software or run code are never handed to another app. */
+private val blockedExtensions = setOf("apk", "apks", "xapk", "aab", "dex", "jar", "sh", "bat", "exe", "js", "html", "htm", "svg")
+
 private fun openFile(ctx: android.content.Context, f: File) {
+    if (f.extension.lowercase() in blockedExtensions) {
+        Toast.makeText(ctx, "For safety, FamilyTalk won't open .${f.extension} files.", Toast.LENGTH_LONG).show(); return
+    }
     runCatching {
         val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
         val mime = ctx.contentResolver.getType(uri) ?: "*/*"

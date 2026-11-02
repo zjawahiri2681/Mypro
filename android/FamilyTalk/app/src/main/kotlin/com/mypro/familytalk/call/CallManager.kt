@@ -36,7 +36,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-data class PeerUi(val memberId: String, val name: String, val ext: Int?, val state: String, val video: VideoTrack?, val camOn: Boolean = true, val micOn: Boolean = true)
+data class PeerUi(val memberId: String, val name: String, val ext: Int?, val state: String, val video: VideoTrack?, val camOn: Boolean = true, val micOn: Boolean = true, val color: Int = 0)
 
 data class CallUi(
     val callId: String,
@@ -51,6 +51,7 @@ data class CallUi(
     val connectedAt: Long? = null,
     val endReason: String? = null,
     val conference: Boolean = false,
+    val canAdd: Boolean = false,
     val verified: Boolean = false,
     val echoTest: Boolean = false,
 )
@@ -69,6 +70,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     val ui: StateFlow<CallUi?> = _ui.asStateFlow()
 
     private var session: CallSession? = null
+    /** Whoever started the call: the only one allowed to change who is in it. */
+    private var originator: String = ""
     private var participants: List<String> = emptyList()
     private val joined = mutableSetOf<String>()
     private val gone = mutableSetOf<String>()
@@ -97,6 +100,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         if (targets.isEmpty()) return@post
         val id = Bytes.b64(Bytes.random(12))
         reset(id, outgoing = true, withVideo, listOf(me) + targets.map { it.id })
+        originator = me
         joined += me
         val invite = CallInvite(id, withVideo, participants)
         targets.forEach { family.send(it.identity, invite) }
@@ -126,6 +130,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     /** Adds someone to the running call (turns it into a conference). */
     fun addPerson(m: Member) = post {
         val s = session ?: return@post
+        if (originator != family.myId) return@post // only the person who started the call adds people
         if (m.id in participants || !Mesh.canAdd(participants.size, video)) return@post
         participants = participants + m.id
         gone -= m.id
@@ -174,11 +179,16 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
             is CallAccept -> onAccept(from, p)
             is CallDecline -> onLeft(from, p.callId, p.reason, declined = true)
             is CallHangup -> onLeft(from, p.callId, p.reason, declined = false)
-            is CallMembers -> if (p.callId == session?.callId && from in participants) {
-                participants = p.participants.distinct(); publish()
+            // Only the originator may change the member list, and only by adding people
+            // (removing happens when someone hangs up themselves).
+            is CallMembers -> if (p.callId == session?.callId && from == originator && family.myId in p.participants) {
+                val added = p.participants.distinct().filter { it !in participants && family.roster.value?.byId(it) != null }
+                participants = participants + added; publish()
             }
-            is Sdp -> if (p.callId == session?.callId && from in participants) onSdp(from, p)
-            is Ice -> if (p.callId == session?.callId && from in participants) {
+            // Media is only ever negotiated with people who accepted and have not left:
+            // a member who declined or hung up can never receive our microphone/camera.
+            is Sdp -> if (p.callId == session?.callId && canTalkTo(from)) onSdp(from, p)
+            is Ice -> if (p.callId == session?.callId && canTalkTo(from)) {
                 val c = IceCandidate(p.mid, p.index, p.candidate)
                 peers[from]?.addIce(c) ?: earlyIce.getOrPut(from) { mutableListOf() }.add(c)
             }
@@ -187,6 +197,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         }
     }
 
+    private fun canTalkTo(peer: String) = peer in participants && peer in joined && peer !in gone
+
     private fun onInvite(from: String, p: CallInvite) {
         val me = family.myId
         if (me !in p.participants || from !in p.participants) return
@@ -194,7 +206,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
             if (p.callId != session?.callId) family.sendToMember(from, CallDecline(p.callId, "busy"))
             return
         }
-        reset(p.callId, outgoing = false, p.video, p.participants.distinct())
+        reset(p.callId, outgoing = false, p.video, p.participants.distinct().filter { it == me || family.roster.value?.byId(it) != null })
+        originator = from
         joined += from
         family.sendToMember(from, CallRinging(p.callId))
         apply(session!!.start())
@@ -273,7 +286,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     }
 
     private fun connect(peerId: String) {
-        if (peerId == family.myId || peers.containsKey(peerId)) return
+        if (peerId == family.myId || peers.containsKey(peerId) || !canTalkTo(peerId)) return
         val peer = createPeer(peerId) ?: return
         if (Mesh.shouldOffer(family.myId, peerId)) peer.offer()
     }
@@ -281,7 +294,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
     private fun createPeer(peerId: String): Peer? {
         val s = session ?: return null
         val cfg = family.roster.value?.relay ?: return null
-        val peer = rtc.createPeer(peerId, cfg.ice, family.data.value.relayOnly, object : Peer.Listener {
+        val hasTurn = cfg.ice.any { s -> s.urls.any { it.startsWith("turn") } }
+        val peer = rtc.createPeer(peerId, cfg.ice, family.data.value.relayOnly && hasTurn, object : Peer.Listener {
             override fun onLocalSdp(peer: Peer, type: String, sdp: String) = family.sendToMember(peerId, Sdp(s.callId, type, sdp))
             override fun onLocalIce(peer: Peer, c: IceCandidate) = family.sendToMember(peerId, Ice(s.callId, c.sdpMid, c.sdpMLineIndex, c.sdp))
             override fun onState(peer: Peer, state: PeerConnection.PeerConnectionState) = post {
@@ -309,13 +323,13 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         participants = people; video = withVideo
         joined.clear(); gone.clear(); peers.clear(); earlyIce.clear(); peerState.clear(); remoteMedia.clear()
         _ui.value = null
-        ticker?.cancel()
+        ticker?.cancel(false)
         ticker = exec.scheduleWithFixedDelay({ post { session?.let { event(CallEvent.Tick(System.currentTimeMillis())) } } }, 1, 1, TimeUnit.SECONDS)
     }
 
     private fun finish(reason: String) {
         val s = session ?: return
-        ticker?.cancel()
+        ticker?.cancel(false)
         audio.exitCall()
         LinkService.cancelIncoming(context)
         LinkService.exitCall(context)
@@ -343,7 +357,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
                 else -> "ringing"
             }
             val rm = remoteMedia[id]
-            PeerUi(id, m?.name ?: "Unknown", m?.ext, st, peers[id]?.remoteVideo, rm?.camera ?: video, rm?.mic ?: true)
+            PeerUi(id, m?.name ?: "Unknown", m?.ext, st, peers[id]?.remoteVideo, rm?.camera ?: video, rm?.mic ?: true, m?.color ?: 0)
         }
         val title = if (others.size == 1) peerUis.first().name else "Family call (${others.size + 1})"
         val prev = _ui.value
@@ -352,6 +366,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
             mic = prev?.mic ?: true, camera = prev?.camera ?: video, speaker = prev?.speaker ?: video,
             connectedAt = s.connectedAt, endReason = s.endReason, conference = others.size > 1,
             verified = others.all { it in family.data.value.verified },
+            canAdd = originator == family.myId && Mesh.canAdd(participants.size, video),
         )
     }
 
