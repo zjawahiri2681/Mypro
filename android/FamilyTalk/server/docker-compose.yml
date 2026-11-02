@@ -1,0 +1,26 @@
+# FamilyTalk "Family Hub": your own relay (MQTT over TLS) and TURN server.
+# Runs on any small VPS or a home server with a public address and a domain name.
+# Neither service can read messages or hear calls; self-hosting removes the public
+# broker and Google STUN from the picture so no third party sees your metadata.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    restart: unless-stopped
+    ports:
+      - "8883:8883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./passwd:/mosquitto/config/passwd:ro
+      - ./certs:/certs:ro
+      - mosquitto-data:/mosquitto/data
+
+  coturn:
+    image: coturn/coturn:4.6.3
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./certs:/certs:ro
+
+volumes:
+  mosquitto-data:

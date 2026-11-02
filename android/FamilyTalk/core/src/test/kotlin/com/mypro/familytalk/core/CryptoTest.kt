@@ -1,0 +1,69 @@
+package com.mypro.familytalk.core
+
+import com.mypro.familytalk.core.crypto.Bytes
+import com.mypro.familytalk.core.crypto.IdentityKeys
+import com.mypro.familytalk.core.crypto.SafetyNumber
+import com.mypro.familytalk.core.crypto.SealException
+import com.mypro.familytalk.core.crypto.Sealed
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNotEquals
+
+class CryptoTest {
+    private val alice = IdentityKeys.generate()
+    private val bob = IdentityKeys.generate()
+    private val eve = IdentityKeys.generate()
+
+    @Test fun sealOpenRoundTrip() {
+        val msg = Bytes.utf8("salam, dinner at 8")
+        val env = Sealed.seal(msg, "fam", alice, bob.public)
+        assertContentEquals(msg, Sealed.open(env, bob, alice.public))
+    }
+
+    @Test fun ciphertextHidesPlaintext() {
+        val env = Sealed.seal(Bytes.utf8("secret-word-xyz"), "fam", alice, bob.public)
+        assert(!env.toString().contains("secret-word-xyz"))
+    }
+
+    @Test fun wrongRecipientCannotOpen() {
+        val env = Sealed.seal(Bytes.utf8("hi"), "fam", alice, bob.public)
+        assertFailsWith<SealException> { Sealed.open(env.copy(to = eve.memberId), eve, alice.public) }
+    }
+
+    @Test fun forgedSenderRejected() {
+        // Eve signs with her own key but claims to be Alice.
+        val env = Sealed.seal(Bytes.utf8("send money"), "fam", eve, bob.public).copy(from = alice.memberId)
+        assertFailsWith<SealException> { Sealed.open(env, bob, alice.public) }
+    }
+
+    @Test fun tamperedFieldsRejected() {
+        val env = Sealed.seal(Bytes.utf8("hi"), "fam", alice, bob.public)
+        val ct = Bytes.unb64(env.ct).also { it[0] = (it[0].toInt() xor 1).toByte() }
+        assertFailsWith<SealException> { Sealed.open(env.copy(ct = Bytes.b64(ct)), bob, alice.public) }
+        assertFailsWith<SealException> { Sealed.open(env.copy(ts = env.ts + 1), bob, alice.public) }
+        assertFailsWith<SealException> { Sealed.open(env.copy(id = "other"), bob, alice.public) }
+        assertFailsWith<SealException> { Sealed.open(env.copy(family = "fam2"), bob, alice.public) }
+    }
+
+    @Test fun lowOrderEphemeralRejected() {
+        val env = Sealed.seal(Bytes.utf8("hi"), "fam", alice, bob.public)
+        val zero = Bytes.b64(ByteArray(32))
+        // Re-sign so only the DH check can catch it.
+        assertFailsWith<SealException> { Sealed.open(env.copy(eph = zero), bob, alice.public) }
+    }
+
+    @Test fun privateKeyExportRoundTrip() {
+        val again = IdentityKeys.import(alice.exportPrivate())
+        assertEquals(alice.public, again.public)
+    }
+
+    @Test fun safetyNumberIsSymmetricAndKeyBound() {
+        val ab = SafetyNumber.forPair(alice.public, bob.public)
+        assertEquals(60, ab.length)
+        assertEquals(ab, SafetyNumber.forPair(bob.public, alice.public))
+        assertNotEquals(ab, SafetyNumber.forPair(alice.public, eve.public))
+        assertEquals(12, SafetyNumber.format(ab).split(" ").size)
+    }
+}
