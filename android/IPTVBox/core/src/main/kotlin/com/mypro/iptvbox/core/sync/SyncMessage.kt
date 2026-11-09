@@ -24,6 +24,12 @@ data class SyncMessage(
     val t1: Long = 0L,
     val text: String = "",
     val isHost: Boolean = false,
+    /** Addressee for replies (PONG). Empty = everyone. */
+    val to: String = "",
+    /** HTTP headers for LOAD (key=value lines). */
+    val headers: String = "",
+    /** Monotonic per-sender counter, used to drop replayed messages. */
+    val seq: Long = 0L,
 ) {
     @Serializable
     enum class Type { HELLO, STATE, CMD, PING, PONG, CHAT, BYE }
@@ -56,4 +62,25 @@ data class MediaRef(
     enum class Kind { URL, FILE }
 
     val mediaId: String get() = if (kind == Kind.URL) url else "$name|$size"
+}
+
+/**
+ * Drops messages that were already seen. The relay is public, so someone could capture
+ * encrypted packets and send them again; they cannot forge new ones without the room key,
+ * and each sender's sequence number only grows.
+ */
+class ReplayGuard {
+    private val lastSeq = HashMap<String, Long>()
+
+    @Synchronized
+    fun accept(m: SyncMessage): Boolean {
+        if (m.seq <= 0L) return false
+        val last = lastSeq[m.from] ?: 0L
+        if (m.seq <= last) return false
+        lastSeq[m.from] = m.seq
+        return true
+    }
+
+    @Synchronized
+    fun reset() = lastSeq.clear()
 }

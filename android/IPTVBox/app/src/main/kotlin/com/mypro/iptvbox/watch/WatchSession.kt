@@ -9,6 +9,7 @@ import com.mypro.iptvbox.core.sync.LanClientTransport
 import com.mypro.iptvbox.core.sync.LanHostTransport
 import com.mypro.iptvbox.core.sync.MediaRef
 import com.mypro.iptvbox.core.sync.MqttTransport
+import com.mypro.iptvbox.core.sync.ReplayGuard
 import com.mypro.iptvbox.core.sync.SyncCrypto
 import com.mypro.iptvbox.core.sync.SyncMath
 import com.mypro.iptvbox.core.sync.SyncMessage
@@ -53,6 +54,9 @@ object WatchSession {
     private var applyingRemote = false
     private var lastRateSet = 1f
     private val knownPeers = LinkedHashMap<String, Long>()
+    private val replay = ReplayGuard()
+    /** Starts from the wall clock so it keeps growing even if the session is restarted. */
+    private var seqCounter = System.currentTimeMillis() * 1000
 
     /** Hooked by the player screen so viewers get a toast-like status line. */
     var onEvent: (String) -> Unit = {}
@@ -90,6 +94,7 @@ object WatchSession {
     }
 
     private fun startTransport(t: SyncTransport, role: Role, link: WatchLink) {
+        replay.reset()
         transport = t
         _state.value = State(role = role, link = link, status = "Starting…")
         t.onStatus = { s ->
@@ -110,8 +115,9 @@ object WatchSession {
         handler.removeCallbacks(hostTick)
         handler.removeCallbacks(viewerTick)
         transport?.let { t ->
-            runCatching { t.send(SyncMessage(SyncMessage.Type.BYE, selfId, now(), name = displayName)) }
-            handler.postDelayed({ runCatching { t.stop() } }, 300)
+            runCatching { t.send(SyncMessage(SyncMessage.Type.BYE, selfId, now(), name = displayName, seq = ++seqCounter)) }
+            // A LAN host must free its port at once, or hosting again fails with "address in use".
+            if (t is LanHostTransport) runCatching { t.stop() } else handler.postDelayed({ runCatching { t.stop() } }, 300)
         }
         transport = null
         lastHostState = null
@@ -136,12 +142,18 @@ object WatchSession {
         mediaId = media.mediaId
         _state.value = _state.value.copy(link = _state.value.link?.copy(media = media))
         val p = player ?: return
-        send(SyncMessage(SyncMessage.Type.CMD, selfId, now(), cmd = SyncMessage.Cmd.LOAD, mediaId = mediaId, text = media.url, name = media.name, posMs = p.currentPosition, playing = p.playWhenReady))
+        send(SyncMessage(SyncMessage.Type.CMD, selfId, now(), cmd = SyncMessage.Cmd.LOAD, mediaId = mediaId, text = media.url, name = media.name, headers = media.headers, posMs = p.currentPosition, playing = p.playWhenReady))
+    }
+
+    /** Runs a player change that must not be broadcast (e.g. pausing because the app went to the background). */
+    fun silently(block: () -> Unit) {
+        applyingRemote = true
+        try { block() } finally { handler.post { applyingRemote = false } }
     }
 
     // ------------------------------------------------------------ messaging
 
-    private fun send(m: SyncMessage) { transport?.send(m) }
+    private fun send(m: SyncMessage) { transport?.send(m.copy(seq = ++seqCounter)) }
 
     private fun now() = System.currentTimeMillis()
 
@@ -162,6 +174,8 @@ object WatchSession {
     private fun onMessage(m: SyncMessage) {
         val role = _state.value.role
         if (role == Role.NONE) return
+        if (!replay.accept(m)) return // duplicate or replayed packet
+        if (m.to.isNotEmpty() && m.to != selfId) return // addressed to another participant
         if (m.type != SyncMessage.Type.BYE) {
             knownPeers[m.from] = now()
             knownPeers.entries.removeAll { now() - it.value > 30_000 }
@@ -170,15 +184,25 @@ object WatchSession {
         when (m.type) {
             SyncMessage.Type.HELLO -> {
                 onEvent("${m.name.ifBlank { "Someone" }} joined")
-                if (role == Role.HOST) broadcastState()
+                if (role == Role.HOST) {
+                    // A late joiner may have an old link: tell them what is playing now, with its headers.
+                    _state.value.link?.media?.let { media ->
+                        if (media.kind == MediaRef.Kind.URL) {
+                            val p = player
+                            send(SyncMessage(SyncMessage.Type.CMD, selfId, now(), cmd = SyncMessage.Cmd.LOAD, to = m.from, mediaId = media.mediaId, text = media.url, name = media.name, headers = media.headers, posMs = p?.currentPosition ?: 0L, playing = p?.playWhenReady ?: true))
+                        }
+                    }
+                    broadcastState()
+                }
             }
             SyncMessage.Type.BYE -> {
                 knownPeers.remove(m.from)
                 _state.value = _state.value.copy(peers = knownPeers.size)
                 onEvent("${m.name.ifBlank { "Someone" }} left")
             }
-            SyncMessage.Type.PING -> send(SyncMessage(SyncMessage.Type.PONG, selfId, now(), t0 = m.t0, t1 = now(), isHost = role == Role.HOST))
-            SyncMessage.Type.PONG -> if (m.isHost || role == Role.VIEWER) {
+            SyncMessage.Type.PING -> if (role == Role.HOST) send(SyncMessage(SyncMessage.Type.PONG, selfId, now(), t0 = m.t0, t1 = now(), isHost = true, to = m.from))
+            // Only the host's reply to *our* ping measures our clock offset.
+            SyncMessage.Type.PONG -> if (role == Role.VIEWER && m.isHost && m.to == selfId) {
                 clock.addSample(m.t0, m.t1, now())
                 _state.value = _state.value.copy(rttMs = clock.rttMs)
             }
@@ -193,9 +217,11 @@ object WatchSession {
                     onEvent("${m.name.ifBlank { "Viewer" }}: ${cmd.name.lowercase()}")
                     broadcastState()
                 } else if (cmd == SyncMessage.Cmd.LOAD) {
-                    // host changed media; tell UI
-                    mediaId = m.mediaId
-                    onLoadRequested(m.text, m.name)
+                    // host changed media (or we joined late): load it unless we already play it
+                    if (m.mediaId != mediaId || player?.currentMediaItem?.mediaId != m.text) {
+                        mediaId = m.mediaId
+                        onLoadRequested(m.text, m.name, m.headers)
+                    }
                 } else {
                     // another viewer's command, relayed by the host - the host STATE will follow
                 }
@@ -205,7 +231,7 @@ object WatchSession {
     }
 
     /** Set by the player screen so a viewer can switch media when the host zaps. */
-    var onLoadRequested: (url: String, name: String) -> Unit = { _, _ -> }
+    var onLoadRequested: (url: String, name: String, headers: String) -> Unit = { _, _, _ -> }
 
     private fun applyCommand(cmd: SyncMessage.Cmd, m: SyncMessage) {
         val p = player ?: return

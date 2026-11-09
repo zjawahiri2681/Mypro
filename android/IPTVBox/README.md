@@ -31,6 +31,22 @@ Kotlin, Jetpack Compose and AndroidX Media3 (ExoPlayer).
 - Works for streams, URLs and local video files (each side picks the same file). Anyone can play, pause
   or seek; followers stay within ~0.25 s via speed nudging and re-seek on larger drift.
 
+**Looks and sorting**
+- Seven colour themes (Ocean, Sunset, Royal, Emerald, Crimson, Gold, Midnight/OLED) under Settings → Appearance.
+- Channels can be grouped by the provider's groups, by detected **country** (flag + name) or by **language**;
+  detection uses `tvg-country` / `tvg-language`, the XMLTV id suffix and the prefixes in channel/group names
+  ("UK:", "|AR|", "KSA -"). Sort by channel number or A–Z. The same grouping is used in the player's channel list.
+- Video quality: Auto, caps (1080p/720p/480p/360p), Lowest (data saver), or pick one of the variants an
+  HLS/DASH stream offers. Default in Settings, per-stream from the player menu or the yellow remote button.
+
+**Readability and remote control (1.2.0)**
+- Text colour choice (Snow white, Soft white, Warm ivory, Silver, Sky blue, Mint, High-contrast yellow) and
+  text size (Small to Extra large) under Settings → Appearance, with a live preview. TV boxes start 15% larger.
+- One focus style everywhere (ring + zoom), initial focus on every screen, focus restored when going back,
+  TV-safe margins, search fields that never trap the remote, hold OK in the player for options, BACK hides
+  the info bar first and asks before leaving a watch party.
+- Adaptive layout: bottom bar on phones, compact rail on TV/tablets, full rail on wide screens.
+
 **Open anything**
 - *Open URL / file* plays any HTTP(S)/RTSP/UDP stream or local file; the app registers as a video
   player so browsers, file managers and messaging apps can hand media to it.
@@ -81,3 +97,5 @@ to install later builds as updates instead of uninstall/reinstall.
 - The app ships no channels or content: it plays only what the user's own playlists, servers and files provide.
 - Minification is disabled for this personal build to keep behaviour predictable; the APK is larger than it needs to be.
 - Stalker portal support is best-effort; portals differ widely.
+- Audio formats phones often can't decode (AC3/E-AC3/DTS) are handled by the bundled FFmpeg decoder
+  (`org.jellyfin.media3:media3-ffmpeg-decoder`).

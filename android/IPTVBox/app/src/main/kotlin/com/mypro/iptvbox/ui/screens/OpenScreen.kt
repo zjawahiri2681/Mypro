@@ -1,5 +1,6 @@
 package com.mypro.iptvbox.ui.screens
 
+import com.mypro.iptvbox.ui.tvFocus
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -53,7 +54,7 @@ fun OpenScreen() {
                         Switch(checked = live, onCheckedChange = { live = it })
                         Text("Treat as live stream (auto-reconnect, no seeking)")
                     }
-                    Button(onClick = { PlayerActivity.playUrl(context, url.trim(), url.trim(), headers, live) }, enabled = url.isNotBlank()) {
+                    Button(modifier = Modifier.tvFocus(), onClick = { PlayerActivity.playUrl(context, url.trim(), url.trim(), headers, live) }, enabled = url.isNotBlank()) {
                         Icon(Icons.Default.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("Play")
                     }
                 }
@@ -62,10 +63,10 @@ fun OpenScreen() {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Video file on this device", style = MaterialTheme.typography.titleMedium)
                     Text("Plays MP4, MKV, TS, AVI, WebM and more, from internal storage, SD card or USB drive. Local files can also be shared in a watch party on the same Wi-Fi.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { picker.launch(arrayOf("video/*", "audio/*", "*/*")) }) { Icon(Icons.Default.FolderOpen, null); Spacer(Modifier.width(6.dp)); Text("Choose file") }
+                    Button(modifier = Modifier.tvFocus(), onClick = { picker.launch(arrayOf("video/*", "audio/*", "*/*")) }) { Icon(Icons.Default.FolderOpen, null); Spacer(Modifier.width(6.dp)); Text("Choose file") }
                 }
             }
-            Text("Tip: IPTV Box registers as a video player, so you can also open streams and files from a browser, file manager or messaging app.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Tip: IPTV Box registers as a video player, so you can also open streams and files from a browser, file manager or messaging app.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

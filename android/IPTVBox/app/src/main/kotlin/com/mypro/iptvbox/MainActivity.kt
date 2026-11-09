@@ -18,6 +18,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.decorView.setBackgroundColor(com.mypro.iptvbox.ui.themeWindowColor())
         setContent {
             IptvTheme { HomeScreen(pendingLink = pendingLink.value, onLinkConsumed = { pendingLink.value = null }) }
         }

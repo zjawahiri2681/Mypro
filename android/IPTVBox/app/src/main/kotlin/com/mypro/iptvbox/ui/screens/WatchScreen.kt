@@ -1,5 +1,6 @@
 package com.mypro.iptvbox.ui.screens
 
+import com.mypro.iptvbox.ui.tvFocus
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -80,21 +81,21 @@ fun WatchScreen(pendingLink: WatchLink?, onLinkConsumed: () -> Unit) {
                         Text(
                             "Room ${preview.shortCode()} from ${preview.hostName.ifBlank { "a friend" }} · ${if (preview.mode == WatchLink.Mode.LAN) "same Wi-Fi" else "internet"} · " +
                                 if (preview.media.kind == MediaRef.Kind.FILE) "local file ${preview.media.name}" else preview.media.name.ifBlank { preview.media.url },
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { join() }, enabled = text.isNotBlank()) { Icon(Icons.Default.Login, null); Spacer(Modifier.width(6.dp)); Text("Join") }
-                        if (preview?.media?.kind == MediaRef.Kind.FILE) Text("You will be asked to pick the same video file.", Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.bodySmall)
+                        Button(modifier = Modifier.tvFocus(), onClick = { join() }, enabled = text.isNotBlank()) { Icon(Icons.Default.Login, null); Spacer(Modifier.width(6.dp)); Text("Join") }
+                        if (preview?.media?.kind == MediaRef.Kind.FILE) Text("You will be asked to pick the same video file.", Modifier.align(Alignment.CenterVertically), style = MaterialTheme.typography.bodyMedium)
                     }
-                    if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    if (message.isNotBlank()) Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                 }
             }
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Start a party", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Text("Play anything (a channel, a movie, a URL or a video file from Open URL / file), then press the people icon or choose Options → Watch together in the player. Share the link or let the other person scan the QR code.")
-                    Text("• Over the internet: both devices need internet access. Messages go through a public relay, encrypted end-to-end with the key inside the link.\n• Same Wi-Fi: works with no internet at all, for example two devices at home watching a downloaded film.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("• Over the internet: both devices need internet access. Messages go through a public relay, encrypted end-to-end with the key inside the link.\n• Same Wi-Fi: works with no internet at all, for example two devices at home watching a downloaded film.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (watch.role != WatchSession.Role.NONE) {
@@ -103,12 +104,11 @@ fun WatchScreen(pendingLink: WatchLink?, onLinkConsumed: () -> Unit) {
                         Text(if (watch.role == WatchSession.Role.HOST) "You are hosting a party" else "You are in a party", style = MaterialTheme.typography.titleMedium)
                         Text("${watch.status} · ${watch.peers} connected")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            watch.link?.let { l ->
-                                Button(onClick = {
-                                    if (l.media.kind == MediaRef.Kind.FILE) { parsed = l; filePicker.launch(arrayOf("video/*", "*/*")) } else PlayerActivity.joinWatch(context, l, null)
-                                }) { Text("Back to player") }
-                            }
-                            OutlinedButton(onClick = { WatchSession.leave() }) { Text("Leave") }
+                            Button(modifier = Modifier.tvFocus(), onClick = {
+                                // Bring the running player back; never re-join our own room (that would end a hosted party).
+                                context.startActivity(android.content.Intent(context, PlayerActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+                            }) { Text("Back to player") }
+                            OutlinedButton(modifier = Modifier.tvFocus(), onClick = { WatchSession.leave() }) { Text("Leave") }
                         }
                     }
                 }

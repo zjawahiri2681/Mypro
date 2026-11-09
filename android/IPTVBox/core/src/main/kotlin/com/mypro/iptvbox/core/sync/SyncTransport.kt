@@ -17,6 +17,18 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
+/** Reads one line, giving up on lines longer than [max] chars so a peer cannot exhaust memory. */
+internal fun BufferedReader.readBoundedLine(max: Int = 16_384): String? {
+    val sb = StringBuilder()
+    while (true) {
+        val c = read()
+        if (c < 0) return if (sb.isEmpty()) null else sb.toString()
+        if (c == '\n'.code) return sb.toString()
+        if (c != '\r'.code) sb.append(c.toChar())
+        if (sb.length > max) throw java.io.IOException("Line too long")
+    }
+}
+
 /** Delivers encrypted [SyncMessage]s between participants. Callbacks arrive on background threads. */
 interface SyncTransport {
     var onMessage: (SyncMessage) -> Unit
@@ -147,7 +159,7 @@ class LanHostTransport(
         try {
             val reader = BufferedReader(InputStreamReader(peer.socket.getInputStream(), Charsets.UTF_8))
             while (running.get()) {
-                val line = reader.readLine() ?: break
+                val line = reader.readBoundedLine() ?: break
                 val plain = crypto.decrypt(line) ?: continue
                 val msg = runCatching { SyncMessage.decode(plain) }.getOrNull() ?: continue
                 // relay to other viewers so they can see each other's commands
@@ -210,7 +222,7 @@ class LanClientTransport(
                     attempt = 0
                     val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.UTF_8))
                     while (running.get()) {
-                        val line = reader.readLine() ?: break
+                        val line = reader.readBoundedLine() ?: break
                         val plain = crypto.decrypt(line) ?: continue
                         val msg = runCatching { SyncMessage.decode(plain) }.getOrNull() ?: continue
                         if (msg.from != selfId) onMessage(msg)

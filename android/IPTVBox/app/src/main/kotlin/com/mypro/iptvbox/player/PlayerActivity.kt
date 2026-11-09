@@ -44,7 +44,9 @@ import com.mypro.iptvbox.core.model.Programme
 import com.mypro.iptvbox.core.net.Http
 import com.mypro.iptvbox.core.sync.MediaRef
 import com.mypro.iptvbox.core.sync.WatchLink
+import com.mypro.iptvbox.core.util.ChannelOrganizer
 import com.mypro.iptvbox.data.DecoderMode
+import com.mypro.iptvbox.data.QualityCap
 import com.mypro.iptvbox.ui.IptvTheme
 import com.mypro.iptvbox.util.Files
 import com.mypro.iptvbox.util.Net
@@ -68,11 +70,15 @@ class PlayerActivity : ComponentActivity() {
         const val EXTRA_IS_LIVE = "isLive"
         const val EXTRA_WATCH_LINK = "watchLink"
         const val EXTRA_FILE_URI = "fileUri"
+        private const val EXTRA_TOKEN = "internalToken"
+        /** Per-process secret: extras from other apps (or intent:// links) are ignored without it. */
+        private val INTERNAL_TOKEN: String = java.util.UUID.randomUUID().toString()
 
         fun playChannel(ctx: Context, channel: Channel, group: String? = null) {
             ctx.startActivity(
                 Intent(ctx, PlayerActivity::class.java)
                     .putExtra(EXTRA_TYPE, TYPE_CHANNEL)
+                    .putExtra(EXTRA_TOKEN, INTERNAL_TOKEN)
                     .putExtra(EXTRA_CHANNEL_ID, channel.id)
                     .putExtra(EXTRA_GROUP, group ?: channel.group),
             )
@@ -82,6 +88,7 @@ class PlayerActivity : ComponentActivity() {
             ctx.startActivity(
                 Intent(ctx, PlayerActivity::class.java)
                     .putExtra(EXTRA_TYPE, TYPE_URL)
+                    .putExtra(EXTRA_TOKEN, INTERNAL_TOKEN)
                     .putExtra(EXTRA_URL, url)
                     .putExtra(EXTRA_TITLE, title)
                     .putExtra(EXTRA_HEADERS, headers)
@@ -93,6 +100,7 @@ class PlayerActivity : ComponentActivity() {
             ctx.startActivity(
                 Intent(ctx, PlayerActivity::class.java)
                     .putExtra(EXTRA_TYPE, TYPE_WATCH)
+                    .putExtra(EXTRA_TOKEN, INTERNAL_TOKEN)
                     .putExtra(EXTRA_WATCH_LINK, link.toUri())
                     .putExtra(EXTRA_FILE_URI, fileUri?.toString()),
             )
@@ -114,21 +122,39 @@ class PlayerActivity : ComponentActivity() {
     private var currentHeaders: String = ""
     private var currentFileUri: Uri? = null
     private var retryCount = 0
+    private var currentUa: String = ""
+    private var triedHlsFallback = false
+    /** Channel a catch-up programme belongs to, so zapping and the guide keep working. */
+    private var catchupChannel: Channel? = null
     private var isInPip = false
-    private val retryRunnable = Runnable { if (!isDestroyed) { player.prepare(); player.play() } }
+    private val retryRunnable = Runnable {
+        if (isDestroyed) return@Runnable
+        if (player.playbackState == Player.STATE_ENDED || player.playbackState == Player.STATE_IDLE) {
+            // prepare() alone does nothing after ENDED; jump back to the live edge and reload.
+            val item = player.currentMediaItem
+            if (item != null) { player.setMediaItem(item); player.seekToDefaultPosition() }
+            player.prepare()
+        } else {
+            player.seekToDefaultPosition()
+            player.prepare()
+        }
+        player.play()
+    }
     private val numberRunnable = Runnable { commitNumberInput() }
     private val toastRunnable = Runnable { ui.toast = "" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.decorView.setBackgroundColor(android.graphics.Color.BLACK)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
         player = buildPlayer()
+        applyInitialQuality()
         WatchSession.attachPlayer(player)
         WatchSession.onEvent = { showToast(it) }
-        WatchSession.onLoadRequested = { url, name ->
-            if (WatchSession.state.value.role == WatchSession.Role.VIEWER && url.isNotBlank()) startUrl(url, name, "", isLive = false)
+        WatchSession.onLoadRequested = { url, name, headers ->
+            if (WatchSession.state.value.role == WatchSession.Role.VIEWER && url.isNotBlank()) startUrl(url, name, headers, isLive = false)
         }
         setContent {
             IptvTheme {
@@ -148,11 +174,28 @@ class PlayerActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         intent ?: return
-        when (intent.getStringExtra(EXTRA_TYPE)) {
+        val trusted = intent.getStringExtra(EXTRA_TOKEN) == INTERNAL_TOKEN
+        when (if (trusted) intent.getStringExtra(EXTRA_TYPE) else null) {
             TYPE_CHANNEL -> {
                 val id = intent.getStringExtra(EXTRA_CHANNEL_ID) ?: return
-                val channel = repo.channelById(id) ?: run { ui.error = "Channel not found"; return }
-                setZapList(intent.getStringExtra(EXTRA_GROUP) ?: channel.group)
+                val channel = repo.channelById(id) ?: run {
+                    // After Android killed the app, the channel list may still be loading from cache.
+                    ui.buffering = true
+                    lifecycleScope.launch {
+                        repo.awaitContent()
+                        val c = repo.channelById(id)
+                        if (c == null) { ui.buffering = false; ui.error = "Channel not found. The playlist may have changed." } else { setZapList(c.group); startChannel(c) }
+                    }
+                    return
+                }
+                val requested = intent.getStringExtra(EXTRA_GROUP)
+                val all = repo.content.value?.channels ?: emptyList()
+                val key = when {
+                    requested == "Favourites" || requested == "All channels" -> requested ?: ""
+                    requested != null && ChannelOrganizer.of(all).groups(settings.current.groupMode).any { it.key == requested } -> requested
+                    else -> ChannelOrganizer.of(all).keyOf(channel, settings.current.groupMode)
+                }
+                setZapList(key)
                 startChannel(channel)
             }
             TYPE_URL -> {
@@ -180,17 +223,24 @@ class PlayerActivity : ComponentActivity() {
         }
     }
 
-    private fun setZapList(group: String) {
+    private fun channelsFor(group: String): List<Channel> {
         val all = repo.content.value?.channels ?: emptyList()
-        zapList = when (group) {
-            "Favourites" -> { val f = repo.favorites.value; all.filter { it.id in f } }
-            "All channels", "" -> all
-            else -> all.filter { it.group == group }.ifEmpty { all }
+        val s = settings.current
+        return when (group) {
+            "Favourites" -> { val f = repo.favorites.value; ChannelOrganizer.sort(all.filter { it.id in f }, s.sortMode) }
+            "All channels", "" -> ChannelOrganizer.sort(all, s.sortMode)
+            else -> ChannelOrganizer.of(all).channelsIn(s.groupMode, group, s.sortMode)
         }
-        ui.groupName = group.ifBlank { "All channels" }
+    }
+
+    private fun setZapList(group: String) {
+        val list = channelsFor(group)
+        zapList = list.ifEmpty { channelsFor("All channels") }
+        ui.groupName = if (list.isEmpty()) "All channels" else group.ifBlank { "All channels" }
     }
 
     private fun startChannel(channel: Channel) {
+        catchupChannel = null
         zapIndex = zapList.indexOfFirst { it.id == channel.id }
         ui.channel = channel
         ui.title = channel.name
@@ -204,14 +254,15 @@ class PlayerActivity : ComponentActivity() {
         lifecycleScope.launch {
             val url = runCatching { repo.resolveUrl(channel) }.getOrElse { e -> ui.error = "Cannot resolve stream: ${e.message}"; return@launch }
             if (ui.channel?.id != channel.id) return@launch
-            play(url, channel.headers)
+            play(url, channel.headers, repo.userAgentFor(channel.playlistId))
             if (WatchSession.state.value.role == WatchSession.Role.HOST) {
                 WatchSession.hostMediaChanged(MediaRef(MediaRef.Kind.URL, url = url, name = channel.name, headers = channel.headers))
             }
         }
     }
 
-    private fun startUrl(url: String, title: String, headers: String, isLive: Boolean) {
+    private fun startUrl(url: String, title: String, headers: String, isLive: Boolean, ua: String = settings.current.userAgent) {
+        catchupChannel = null
         ui.channel = null
         ui.title = title
         ui.logo = ""
@@ -220,23 +271,26 @@ class PlayerActivity : ComponentActivity() {
         ui.nowProgramme = null; ui.nextProgramme = null
         ui.isFavorite = false
         if (zapList.isEmpty()) ui.groupName = ""
-        play(url, headers)
+        play(url, headers, ua)
     }
 
-    private fun play(url: String, headers: String) {
+    private fun play(url: String, headers: String, userAgent: String = settings.current.userAgent, forceHls: Boolean = false) {
         handler.removeCallbacks(retryRunnable)
         retryCount = 0
+        triedHlsFallback = forceHls
         currentUrl = url
         currentHeaders = headers
+        currentUa = userAgent
         ui.error = null
         ui.buffering = true
+        okHttpFactory.setUserAgent(userAgent.ifBlank { Http.DEFAULT_UA })
         okHttpFactory.setDefaultRequestProperties(headers.toHeaderMap())
         val uri = Uri.parse(url)
         val b = MediaItem.Builder().setUri(uri).setMediaId(url)
             .setMediaMetadata(MediaMetadata.Builder().setTitle(ui.title).build())
         val lower = url.lowercase().substringBefore('?')
         when {
-            lower.endsWith(".m3u8") || lower.contains(".m3u8?") || lower.contains("/hls/") -> b.setMimeType(MimeTypes.APPLICATION_M3U8)
+            forceHls || lower.endsWith(".m3u8") || lower.contains(".m3u8?") || lower.contains("/hls/") -> b.setMimeType(MimeTypes.APPLICATION_M3U8)
             lower.endsWith(".mpd") -> b.setMimeType(MimeTypes.APPLICATION_MPD)
             lower.contains(".ism") -> b.setMimeType(MimeTypes.APPLICATION_SS)
             lower.endsWith(".ts") && ui.isLive -> b.setMimeType(MimeTypes.VIDEO_MP2T)
@@ -330,13 +384,19 @@ class PlayerActivity : ComponentActivity() {
         return p
     }
 
+    private fun applyInitialQuality() {
+        val cap = settings.current.qualityCap
+        applyQualityCap(cap)
+        ui.quality = cap.label
+    }
+
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             ui.buffering = playbackState == Player.STATE_BUFFERING
             if (playbackState == Player.STATE_READY) {
                 retryCount = 0
                 ui.error = null
-                ui.isLive = player.isCurrentMediaItemLive || player.duration == C.TIME_UNSET
+                ui.isLive = player.isCurrentMediaItemLive || (player.duration == C.TIME_UNSET && catchupChannel == null && ui.isLive)
                 updateVideoInfo()
             }
             if (playbackState == Player.STATE_ENDED && ui.isLive && currentUrl.isNotEmpty()) {
@@ -350,6 +410,19 @@ class PlayerActivity : ComponentActivity() {
         override fun onTracksChanged(tracks: Tracks) { updateVideoInfo() }
 
         override fun onPlayerError(error: PlaybackException) {
+            // Many panels serve HLS from URLs without ".m3u8": retry once as HLS before giving up.
+            if (!triedHlsFallback && error.errorCode in setOf(
+                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+                    PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+                    PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+                )
+            ) {
+                play(currentUrl, currentHeaders, currentUa, forceHls = true)
+                return
+            }
+            if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+                player.seekToDefaultPosition(); player.prepare(); return
+            }
             val msg = describe(error)
             if (ui.isLive && retryCount < 6 && !msg.startsWith("HTTP 4")) {
                 scheduleRetry()
@@ -407,13 +480,27 @@ class PlayerActivity : ComponentActivity() {
         override fun seekTo(ms: Long) { player.seekTo(ms) }
         override fun zap(delta: Int) = this@PlayerActivity.zap(delta)
         override fun selectChannel(channel: Channel, group: String) { setZapList(group); startChannel(channel) }
-        override fun channelsInGroup(group: String): List<Channel> {
-            val all = repo.content.value?.channels ?: emptyList()
-            return when (group) { "Favourites" -> { val f = repo.favorites.value; all.filter { it.id in f } }; "All channels" -> all; else -> all.filter { it.group == group } }
-        }
+        override fun channelsInGroup(group: String): List<Channel> = channelsFor(group)
         override fun groups(): List<String> {
             val all = repo.content.value?.channels ?: emptyList()
-            return listOf("All channels", "Favourites") + all.map { it.group.ifBlank { "Other" } }.distinct()
+            return listOf("All channels", "Favourites") + ChannelOrganizer.of(all).groups(settings.current.groupMode).map { it.key }
+        }
+        override fun groupModeLabel(): String = settings.current.groupMode.label
+        override fun cycleGroupMode() {
+            settings.update { it.copy(groupMode = com.mypro.iptvbox.core.util.GroupMode.entries[(it.groupMode.ordinal + 1) % com.mypro.iptvbox.core.util.GroupMode.entries.size]) }
+        }
+        override fun videoTracks(): List<TrackOption> = tracksOf(C.TRACK_TYPE_VIDEO)
+        override fun qualityLabel(): String = ui.quality
+        override fun setQualityCap(cap: QualityCap) {
+            applyQualityCap(cap)
+            ui.quality = cap.label
+            if (cap == QualityCap.AUTO || cap == QualityCap.LOWEST) settings.update { it.copy(qualityCap = cap) }
+        }
+        override fun selectVideoTrack(option: TrackOption) {
+            player.trackSelectionParameters = player.trackSelectionParameters.buildUpon()
+                .setForceLowestBitrate(false).setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+                .setOverrideForType(TrackSelectionOverride(option.group.mediaTrackGroup, option.index)).build()
+            ui.quality = option.label
         }
         override fun programmes(channel: Channel): List<Programme> {
             val t = System.currentTimeMillis()
@@ -423,7 +510,14 @@ class PlayerActivity : ComponentActivity() {
         override fun playCatchup(channel: Channel, programme: Programme) {
             val url = repo.catchupUrl(channel, programme) ?: run { showToast("Catch-up not available for this channel"); return }
             ui.epgPanel = false
-            startUrl(url, "${channel.name} • ${programme.title}", channel.headers, isLive = false)
+            val keepZap = zapList; val keepIndex = zapIndex; val keepGroup = ui.groupName
+            startUrl(url, "${channel.name} • ${programme.title}", channel.headers, isLive = false, ua = repo.userAgentFor(channel.playlistId))
+            // stay "on" the channel: up/down still zaps, the guide still opens, the logo stays
+            catchupChannel = channel
+            zapList = keepZap; zapIndex = keepIndex; ui.groupName = keepGroup
+            ui.channel = channel; ui.logo = channel.logo; ui.number = channel.number
+            ui.isFavorite = channel.id in repo.favorites.value
+            ui.nowProgramme = programme; ui.nextProgramme = null
         }
         override fun toggleFavorite() {
             val ch = ui.channel ?: return
@@ -474,6 +568,16 @@ class PlayerActivity : ComponentActivity() {
         override fun onNumberKey(digit: Char) = appendNumber(digit)
     }
 
+    private fun applyQualityCap(cap: QualityCap) {
+        val b = player.trackSelectionParameters.buildUpon().clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+        when {
+            cap == QualityCap.LOWEST -> b.setForceLowestBitrate(true).setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+            cap.maxHeight > 0 -> b.setForceLowestBitrate(false).setMaxVideoSize(Int.MAX_VALUE, cap.maxHeight)
+            else -> b.setForceLowestBitrate(false).setMaxVideoSize(Int.MAX_VALUE, Int.MAX_VALUE)
+        }
+        player.trackSelectionParameters = b.build()
+    }
+
     private fun tracksOf(type: Int): List<TrackOption> {
         val out = ArrayList<TrackOption>()
         for (group in player.currentTracks.groups) {
@@ -481,8 +585,17 @@ class PlayerActivity : ComponentActivity() {
             for (i in 0 until group.length) {
                 if (!group.isTrackSupported(i)) continue
                 val f = group.getTrackFormat(i)
-                val label = listOfNotNull(f.label, f.language?.let { java.util.Locale(it).displayLanguage }, f.codecs?.substringBefore('.')?.uppercase(), if (f.channelCount > 0) "${f.channelCount}ch" else null)
-                    .distinct().joinToString(" · ").ifBlank { "Track ${out.size + 1}" }
+                val label = if (type == C.TRACK_TYPE_VIDEO) {
+                    listOfNotNull(
+                        if (f.height > 0) "${f.height}p" else null,
+                        if (f.width > 0 && f.height > 0) "${f.width}×${f.height}" else null,
+                        if (f.bitrate > 0) String.format(java.util.Locale.US, "%.1f Mbps", f.bitrate / 1_000_000f) else null,
+                        if (f.frameRate > 0) "${f.frameRate.toInt()} fps" else null,
+                    ).joinToString(" · ").ifBlank { "Variant ${out.size + 1}" }
+                } else {
+                    listOfNotNull(f.label, f.language?.let { java.util.Locale(it).displayLanguage }, f.codecs?.substringBefore('.')?.uppercase(), if (f.channelCount > 0) "${f.channelCount}ch" else null)
+                        .distinct().joinToString(" · ").ifBlank { "Track ${out.size + 1}" }
+                }
                 out += TrackOption(type, group, i, label, group.isTrackSelected(i))
             }
         }
@@ -525,6 +638,7 @@ class PlayerActivity : ComponentActivity() {
                 KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_SETTINGS -> { if (!ui.anyPanel) { ui.menu = true; return true } }
                 KeyEvent.KEYCODE_GUIDE, KeyEvent.KEYCODE_PROG_RED -> { if (!ui.anyPanel && ui.channel != null) { ui.epgPanel = true; return true } }
                 KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_PROG_GREEN -> { ui.overlay = !ui.overlay; return true }
+                KeyEvent.KEYCODE_PROG_YELLOW -> { if (!ui.anyPanel) { ui.menuInitialSub = "Video quality"; ui.menu = true; return true } }
             }
             if (event.keyCode in KeyEvent.KEYCODE_0..KeyEvent.KEYCODE_9 && !ui.anyPanel && zapList.isNotEmpty()) {
                 appendNumber('0' + (event.keyCode - KeyEvent.KEYCODE_0)); return true
@@ -534,10 +648,13 @@ class PlayerActivity : ComponentActivity() {
             }
             if (!ui.anyPanel) {
                 when (event.keyCode) {
-                    KeyEvent.KEYCODE_DPAD_UP -> { if (ui.channel != null) zap(1) else ui.overlay = true; return true }
-                    KeyEvent.KEYCODE_DPAD_DOWN -> { if (ui.channel != null) zap(-1) else ui.overlay = true; return true }
+                    KeyEvent.KEYCODE_DPAD_UP -> { if (ui.channel != null || catchupChannel != null) zap(1) else ui.overlay = true; return true }
+                    KeyEvent.KEYCODE_DPAD_DOWN -> { if (ui.channel != null || catchupChannel != null) zap(-1) else ui.overlay = true; return true }
                     KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                        if (ui.channel != null && zapList.isNotEmpty()) ui.channelList = true else { actions.togglePlay(); ui.overlay = true }
+                        // Short press acts on key-up; holding OK opens the options menu
+                        // (remotes without a MENU key, e.g. Chromecast with Google TV, Shield).
+                        if (event.repeatCount == 0) { okPressed = true; okLongPressed = false }
+                        else if (okPressed && !okLongPressed) { okLongPressed = true; ui.menu = true }
                         return true
                     }
                     KeyEvent.KEYCODE_DPAD_LEFT -> { if (ui.isLive) { if (ui.channel != null) ui.epgPanel = true } else { actions.seekBy(-10_000); ui.overlay = true }; return true }
@@ -545,8 +662,21 @@ class PlayerActivity : ComponentActivity() {
                 }
             }
         }
+        if (event.action == KeyEvent.ACTION_UP && okPressed &&
+            (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER || event.keyCode == KeyEvent.KEYCODE_ENTER || event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER)
+        ) {
+            okPressed = false
+            if (!okLongPressed && !ui.anyPanel) {
+                if (ui.channel != null && zapList.isNotEmpty()) ui.channelList = true else { actions.togglePlay(); ui.overlay = true }
+            }
+            okLongPressed = false
+            return true
+        }
         return super.dispatchKeyEvent(event)
     }
+
+    private var okPressed = false
+    private var okLongPressed = false
 
     // ------------------------------------------------------------------ lifecycle / PiP
 
@@ -574,12 +704,14 @@ class PlayerActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        if (!isInPip && !isChangingConfigurations) player.pause()
+        val inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
+        if (!inPip && !isChangingConfigurations) WatchSession.silently { player.pause() }
     }
 
     override fun onStart() {
         super.onStart()
-        if (!player.isPlaying && player.playbackState != Player.STATE_IDLE && ui.error == null && !isInPip) {
+        val inPip = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode
+        if (!player.isPlaying && player.playbackState != Player.STATE_IDLE && ui.error == null && !inPip && !WatchSession.active) {
             if (ui.isLive) { player.seekToDefaultPosition(); player.prepare() }
             player.play()
         }
@@ -588,7 +720,7 @@ class PlayerActivity : ComponentActivity() {
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
         WatchSession.onEvent = {}
-        WatchSession.onLoadRequested = { _, _ -> }
+        WatchSession.onLoadRequested = { _, _, _ -> }
         WatchSession.detachPlayer(player)
         // Leaving the player ends the party for this device (host or viewer).
         WatchSession.leave()
@@ -633,4 +765,10 @@ interface PlayerActions {
     fun copyText(text: String)
     fun openExternal()
     fun onNumberKey(digit: Char)
+    fun groupModeLabel(): String
+    fun cycleGroupMode()
+    fun videoTracks(): List<TrackOption>
+    fun qualityLabel(): String
+    fun setQualityCap(cap: QualityCap)
+    fun selectVideoTrack(option: TrackOption)
 }

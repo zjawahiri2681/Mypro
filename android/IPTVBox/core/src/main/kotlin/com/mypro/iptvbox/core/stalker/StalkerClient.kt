@@ -128,7 +128,15 @@ class StalkerClient(val playlist: Playlist) {
     /** Converts the stored "cmd" into a playable URL (portals hand out temporary links). */
     fun resolveLink(cmd: String): String {
         if (token.isEmpty()) handshake()
-        val r = call("type=itv&action=create_link&cmd=${enc(cmd)}&series=&forced_storage=undefined&disable_ad=0&download=0&force_ch_link_check=0")
+        val q = "type=itv&action=create_link&cmd=${enc(cmd)}&series=&forced_storage=undefined&disable_ad=0&download=0&force_ch_link_check=0"
+        // Portals expire tokens: on failure, handshake again and retry once.
+        val r = try {
+            call(q).also { if (it["js"] !is JsonObject) throw IOException("create_link failed") }
+        } catch (e: Exception) {
+            token = ""
+            handshake()
+            call(q)
+        }
         val js = r["js"] as? JsonObject ?: throw IOException("create_link failed")
         val link = js.str("cmd").ifBlank { cmd }
         return stripPrefix(link)

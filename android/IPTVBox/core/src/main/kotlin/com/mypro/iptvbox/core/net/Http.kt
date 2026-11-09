@@ -32,10 +32,16 @@ object Http {
         if (!resp.isSuccessful) {
             val code = resp.code
             resp.close()
-            throw IOException("HTTP $code for $url")
+            throw IOException("HTTP $code from ${redact(url)}")
         }
         return resp
     }
+
+    /** Hides credentials in URLs shown in errors/logs (query passwords and Xtream path segments). */
+    fun redact(url: String): String = url
+        .replace(Regex("""(?i)(password|pass|pwd|token)=[^&]*"""), "$1=***")
+        .replace(Regex("""(?i)(username|user)=[^&]*"""), "$1=***")
+        .replace(Regex("""/(live|movie|series|timeshift)/[^/]+/[^/]+/"""), "/$1/***/***/")
 
     fun getString(url: String, userAgent: String = "", headers: Map<String, String> = emptyMap()): String =
         get(url, userAgent, headers).use { it.body?.string() ?: "" }
