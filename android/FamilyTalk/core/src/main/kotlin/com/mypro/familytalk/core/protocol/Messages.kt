@@ -44,10 +44,27 @@ data class ChatReceipt(val msgIds: List<String>, val read: Boolean) : Payload
 
 /** Small files (<= [com.mypro.familytalk.core.files.FileTransfer.INLINE_LIMIT]) travel inline in chunks via the relay. */
 @Serializable @SerialName("file")
-data class FileOffer(val fileId: String, val name: String, val mime: String, val size: Long, val sha256: String, val chunks: Int, val sentAt: Long, val group: Boolean = false) : Payload
+data class FileOffer(
+    val fileId: String, val name: String, val mime: String, val size: Long, val sha256: String, val chunks: Int, val sentAt: Long,
+    val group: Boolean = false,
+    /** "Flash" photo: the receiver can open it once, then it is deleted from their phone. */
+    val viewOnce: Boolean = false,
+) : Payload
 
 @Serializable @SerialName("chunk")
 data class FileChunk(val fileId: String, val index: Int, val data: String) : Payload
+
+/** Receiver asks the sender to send these chunks again (empty list = all of them). */
+@Serializable @SerialName("resend")
+data class FileResend(val fileId: String, val missing: List<Int> = emptyList()) : Payload
+
+/** "Delete for everyone": only honoured for messages the requester sent themselves. */
+@Serializable @SerialName("delete")
+data class ChatDelete(val msgIds: List<String>) : Payload
+
+/** The receiver opened a view-once photo (it is now gone from their phone). */
+@Serializable @SerialName("viewed")
+data class ViewedOnce(val fileId: String) : Payload
 
 // ---- family ------------------------------------------------------------------------
 @Serializable @SerialName("roster") data class RosterUpdate(val roster: SignedRoster) : Payload

@@ -93,7 +93,7 @@ object Notifications {
     fun cancelIncoming(ctx: Context) = NotificationManagerCompat.from(ctx).cancel(ID_INCOMING)
 
     fun message(ctx: Context, msg: ChatMsg, from: String, preview: Boolean) {
-        val text = msg.text ?: msg.file?.let { "Sent a file: ${it.name}" } ?: return
+        val text = msg.text ?: msg.file?.let { if (it.viewOnce) "Sent a view-once photo" else if (it.mime.startsWith("image/")) "📷 Photo" else "Sent a file: ${it.name}" } ?: return
         val n = NotificationCompat.Builder(ctx, CH_MESSAGES)
             .setSmallIcon(R.drawable.ic_notification)
             // By default only "New message from X" leaves the app (smart watches, notification history, other apps).

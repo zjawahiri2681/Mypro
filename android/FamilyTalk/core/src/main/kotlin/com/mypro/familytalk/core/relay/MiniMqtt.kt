@@ -406,6 +406,13 @@ class MultiRelay(val relays: List<MiniMqttRelay>) : Relay {
     override fun start(inbox: String, onMessage: (ByteArray) -> Unit) = relays.forEach { it.start(inbox, onMessage) }
     override fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean): Boolean =
         relays.filter { it.connected.value }.map { it.publish(topic, data, queueIfOffline) }.any { it }
+    override fun publishSpread(topic: String, data: ByteArray, n: Int): Boolean {
+        val up = relays.filter { it.connected.value }
+        if (up.isEmpty()) return false
+        val first = Math.floorMod(n, up.size)
+        // Try the chosen relay, then the others if its socket just broke.
+        return (up.indices).any { up[(first + it) % up.size].publish(topic, data, true) }
+    }
     override fun stop() { relays.forEach { it.stop() }; scope.coroutineContext[kotlinx.coroutines.Job]?.cancel() }
     fun nudge() = relays.forEach { it.nudge() }
     fun keepAlive() = relays.forEach { it.keepAlive() }

@@ -51,7 +51,7 @@ import com.mypro.familytalk.core.family.Role
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BackScaffold(title: String, nav: Nav, content: @Composable () -> Unit) {
-    Scaffold(topBar = { TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(nav.back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }) }) { pad ->
+    Scaffold(topBar = { TopAppBar(colors = appBarColors(), title = { Text(title) }, navigationIcon = { IconButton(nav.back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }) }) { pad ->
         Column(Modifier.padding(pad).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) { content() }
     }
 }

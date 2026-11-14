@@ -11,6 +11,8 @@ interface Relay {
     fun start(inbox: String, onMessage: (ByteArray) -> Unit)
     /** Returns false if the message could not be handed to the broker. */
     fun publish(topic: String, data: ByteArray, queueIfOffline: Boolean): Boolean
+    /** Bulk data (file chunks): one relay per message, rotating by [n], queued at the broker. */
+    fun publishSpread(topic: String, data: ByteArray, n: Int): Boolean = publish(topic, data, true)
     fun stop()
 }
 

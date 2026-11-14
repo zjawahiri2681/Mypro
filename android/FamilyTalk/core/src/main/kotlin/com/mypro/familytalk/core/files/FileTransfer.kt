@@ -10,16 +10,29 @@ import com.mypro.familytalk.core.protocol.FileOffer
  * Every chunk is individually end-to-end encrypted by the envelope layer.
  */
 object FileTransfer {
-    const val CHUNK = 48 * 1024
+    /**
+     * Sent chunk size. Chosen so one sealed chunk (two base64 layers + headers) fits in the
+     * 64 KiB padding bucket instead of spilling into the 128 KiB one: ~2x less data on the wire.
+     */
+    const val CHUNK = 34 * 1024
+    /** Largest chunk accepted (older versions sent 48 KiB). */
+    const val MAX_CHUNK = 48 * 1024
     const val INLINE_LIMIT = 25L * 1024 * 1024
 
-    fun prepare(name: String, mime: String, data: ByteArray, now: Long = System.currentTimeMillis(), group: Boolean = false): Pair<FileOffer, List<FileChunk>> {
+    fun prepare(name: String, mime: String, data: ByteArray, now: Long = System.currentTimeMillis(), group: Boolean = false, viewOnce: Boolean = false): Pair<FileOffer, List<FileChunk>> {
         require(data.size <= INLINE_LIMIT) { "File is larger than 25 MB" }
         val id = Bytes.b64(Bytes.random(12))
-        val parts = if (data.isEmpty()) listOf(ByteArray(0)) else (data.indices step CHUNK).map { data.copyOfRange(it, minOf(it + CHUNK, data.size)) }
-        val offer = FileOffer(id, sanitizeName(name), mime.take(100), data.size.toLong(), Bytes.hex(Bytes.sha256(data)), parts.size, now, group)
-        return offer to parts.mapIndexed { i, p -> FileChunk(id, i, Bytes.b64(p)) }
+        val offer = FileOffer(id, sanitizeName(name), mime.take(100), data.size.toLong(), Bytes.hex(Bytes.sha256(data)), chunkCount(data.size), now, group, viewOnce)
+        return offer to chunks(id, data)
     }
+
+    fun chunkCount(size: Int) = if (size == 0) 1 else (size + CHUNK - 1) / CHUNK
+
+    /** Chunks of a stored file (all, or only [only]) for sending or re-sending. */
+    fun chunks(fileId: String, data: ByteArray, only: Collection<Int>? = null): List<FileChunk> =
+        (0 until chunkCount(data.size)).filter { only == null || it in only }.map { i ->
+            FileChunk(fileId, i, Bytes.b64(data.copyOfRange(minOf(i * CHUNK, data.size), minOf((i + 1) * CHUNK, data.size))))
+        }
 
     /** Strips paths and control characters so a received name can never escape the download folder. */
     fun sanitizeName(name: String): String {
@@ -31,17 +44,20 @@ object FileTransfer {
     class Assembly(val offer: FileOffer) {
         init {
             require(offer.size in 0..INLINE_LIMIT) { "bad size" }
-            require(offer.chunks in 1..(INLINE_LIMIT / CHUNK + 1)) { "bad chunk count" }
+            require(offer.chunks in 1..(INLINE_LIMIT / 1024 + 1)) { "bad chunk count" }
+            require(offer.chunks.toLong() * MAX_CHUNK >= offer.size) { "bad chunk count" }
         }
         private val parts = arrayOfNulls<ByteArray>(offer.chunks)
         val received: Int get() = parts.count { it != null }
         val complete: Boolean get() = received == offer.chunks
+        /** Chunk indices still missing. */
+        fun missing(): List<Int> = parts.indices.filter { parts[it] == null }
 
         fun add(chunk: FileChunk) {
             require(chunk.fileId == offer.fileId) { "wrong file" }
             require(chunk.index in parts.indices) { "bad index" }
             val data = Bytes.unb64(chunk.data)
-            require(data.size <= CHUNK) { "chunk too big" }
+            require(data.size <= MAX_CHUNK) { "chunk too big" }
             parts[chunk.index] = data
         }
 

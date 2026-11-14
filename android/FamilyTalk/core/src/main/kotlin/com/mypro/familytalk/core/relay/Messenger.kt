@@ -69,8 +69,11 @@ class Messenger(
         val wire = Sealed.sealOuter(inner, to.dhKeyBytes)
         val topic = Topics.inbox(familyId(), to.memberId)
         val brokerQueued = durable || queueAtBroker(payload)
-        if (relay.connected.value && relay.publish(topic, wire, brokerQueued)) return
+        // File chunks are spread over the relays (not copied to all of them); the receiver asks for any it misses.
+        val sent = if (payload is FileChunk) relay.publishSpread(topic, wire, payload.index) else relay.publish(topic, wire, brokerQueued)
+        if (relay.connected.value && sent) return
         when {
+            payload is FileChunk -> Unit // not queued locally: the receiver requests missing chunks with FileResend
             durable -> enqueue(topic, wire)
             brokerQueued -> synchronized(signalOutbox) {
                 signalOutbox.addLast(Triple(clock(), topic, wire)); while (signalOutbox.size > 500) signalOutbox.removeFirst()
@@ -138,6 +141,8 @@ class Messenger(
             p is com.mypro.familytalk.core.protocol.Ice
 
         fun isDurable(p: Payload) = p is ChatText || p is ChatReceipt || p is FileOffer || p is FileChunk || p is RosterUpdate || p is JoinRequest ||
+            p is com.mypro.familytalk.core.protocol.FileResend || p is com.mypro.familytalk.core.protocol.ChatDelete ||
+            p is com.mypro.familytalk.core.protocol.ViewedOnce ||
             p is com.mypro.familytalk.core.protocol.PrekeyAnnounce
     }
 }

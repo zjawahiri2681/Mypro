@@ -130,4 +130,28 @@ class MessengerTest {
         assertFailsWith<IllegalArgumentException> { bad.finish() }
         assertEquals("file", FileTransfer.sanitizeName("..."))
     }
+
+    @Test fun sealedChunkFitsThe64KiBBucketAndMissingChunksCanBeResent() {
+        val data = ByteArray(FileTransfer.CHUNK * 3 + 100) { (it * 31).toByte() }
+        val (offer, chunks) = FileTransfer.prepare("photo.jpg", "image/jpeg", data, viewOnce = true)
+        assertTrue(offer.viewOnce)
+        val env = Sealed.seal(PayloadCodec.encode(chunks[0]), "fam", a, b.public)
+        val inner = Json.encodeToString(Wire.serializer(), Wire(env)).toByteArray()
+        assertTrue(Sealed.pad(inner).size <= 64 * 1024, "chunk spilled into a bigger bucket: ${inner.size}")
+
+        val asm = FileTransfer.Assembly(offer)
+        asm.add(chunks[0]); asm.add(chunks[2])
+        assertEquals(listOf(1, 3), asm.missing())
+        FileTransfer.chunks(offer.fileId, data, asm.missing()).forEach(asm::add)
+        assertContentEquals(data, asm.finish())
+    }
+
+    @Test fun fileChunksAreNotCopiedToEveryRelayButStillArrive() {
+        val got = mutableListOf<Incoming>()
+        val ma = messenger(a, inbox = mutableListOf())
+        messenger(b, inbox = got)
+        val (offer, chunks) = FileTransfer.prepare("a.bin", "application/octet-stream", ByteArray(100_000) { it.toByte() })
+        ma.send(b.public, offer); chunks.forEach { ma.send(b.public, it) }
+        assertEquals(1 + chunks.size, got.size)
+    }
 }

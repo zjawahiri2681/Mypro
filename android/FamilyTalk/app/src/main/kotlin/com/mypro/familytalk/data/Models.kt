@@ -51,7 +51,15 @@ data class AppData(
 data class PendingJoin(val name: String, val identity: PublicIdentity, val request: com.mypro.familytalk.core.protocol.JoinRequest, val safety: String)
 
 @Serializable
-data class FileInfo(val name: String, val mime: String, val size: Long, val localPath: String? = null, val progress: Float = 0f)
+data class FileInfo(
+    val name: String, val mime: String, val size: Long, val localPath: String? = null, val progress: Float = 0f,
+    /** Kept so an interrupted download can be resumed (asked again from the sender). */
+    val sha256: String? = null,
+    val chunks: Int = 0,
+    val viewOnce: Boolean = false,
+    /** View-once photo was opened (receiver: it is deleted; sender: the receiver saw it). */
+    val opened: Boolean = false,
+)
 
 @Serializable
 enum class MsgStatus { SENDING, SENT, DELIVERED, READ, RECEIVED, FAILED }
@@ -67,6 +75,8 @@ data class ChatMsg(
     val file: FileInfo? = null,
     val status: MsgStatus,
     val system: Boolean = false,
+    /** Deleted for everyone: the content is gone, a "message was deleted" placeholder stays. */
+    val deleted: Boolean = false,
 )
 
 const val FAMILY_CONV = "family"
@@ -75,4 +85,10 @@ const val FAMILY_CONV = "family"
 data class CallLogEntry(val id: String, val with: List<String>, val outgoing: Boolean, val video: Boolean, val at: Long, val durationSec: Long, val result: String)
 
 @Serializable
-data class History(val chats: List<ChatMsg> = emptyList(), val calls: List<CallLogEntry> = emptyList(), val unread: Map<String, Int> = emptyMap())
+data class History(
+    val chats: List<ChatMsg> = emptyList(),
+    val calls: List<CallLogEntry> = emptyList(),
+    val unread: Map<String, Int> = emptyMap(),
+    /** "from|msgId" -> time, for deletes that arrive before the message itself. */
+    val tombstones: Map<String, Long> = emptyMap(),
+)

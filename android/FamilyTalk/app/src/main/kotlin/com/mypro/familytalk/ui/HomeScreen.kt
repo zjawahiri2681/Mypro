@@ -90,13 +90,14 @@ fun HomeScreen(app: FamilyTalkApp, nav: Nav) {
     Scaffold(
         topBar = {
             TopAppBar(
+                colors = appBarColors(),
                 title = {
                     Column {
                         Text(roster?.familyName ?: "FamilyTalk", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(
                             (if (online) "● Connected" else if (relayErr != null) "○ Can't reach relay" else "○ Connecting…") + (me?.let { " · You are \u2066${it.ext}\u2069" } ?: ""),
                             style = MaterialTheme.typography.bodyMedium, fontSize = 13.sp,
-                            color = if (online) trustOk() else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = onAppBar().copy(alpha = if (online) 1f else 0.8f),
                         )
                     }
                 },
@@ -201,7 +202,12 @@ private fun ChatsTab(app: FamilyTalkApp, nav: Nav) {
                 modifier = Modifier.clickable { nav.go(Screen.Chat(conv)) },
                 leadingContent = { Avatar(name, m?.color ?: 0) },
                 headlineContent = { Text(name, maxLines = 1) },
-                supportingContent = { Text(last.text ?: last.file?.let { "📎 ${it.name}" } ?: "", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                supportingContent = { Text(when {
+                    last.deleted -> "🚫 Message deleted"
+                    last.file?.viewOnce == true -> "① Photo"
+                    last.file?.mime?.startsWith("image/") == true -> "📷 Photo"
+                    else -> last.text ?: last.file?.let { "📎 ${it.name}" } ?: ""
+                }, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 trailingContent = {
                     Column(horizontalAlignment = Alignment.End) {
                         Text(DateUtils.getRelativeTimeSpanString(last.at, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString(), fontSize = 13.sp)

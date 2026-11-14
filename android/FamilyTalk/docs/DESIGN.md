@@ -10,7 +10,9 @@ numbers, no cloud backup, no ads, no Google push. Every family phone holds its o
 | Voice and video calls between family phones | WebRTC, direct phone-to-phone (P2P), DTLS-SRTP |
 | Conference (up to 6 voice / 4 video) | Full mesh: each pair of phones connects directly |
 | Chat (1:1 and family group) | Sealed envelopes via the relay; queued for offline phones |
-| File sharing (up to 25 MB) | Chunked, each chunk sealed; SHA-256 checked on arrival |
+| File sharing (up to 25 MB) | Chunked, each chunk sealed; SHA-256 checked on arrival. Chunks are spread over the relays; the receiver asks the sender for any it misses (resumes after restarts). Photos preview inline; "Save to phone" puts a copy in Gallery/Downloads › FamilyTalk |
+| Delete | "Delete for me", or "Delete for everyone" (own messages, up to 7 days); a placeholder stays |
+| View-once photos | Opened once in a screenshot-blocked viewer, then deleted from the receiver's phone; the sender sees "Opened". Someone can still photograph the screen with another camera |
 | Internal extensions | 101–199 per person, 0 = ring everyone, *43 = echo test |
 | Outside calls | Any SIP account (provider / PBX): dial 9 or + for numbers, or a sip: address |
 | SIP conference | Several SIP calls merged on the phone (Linphone local conference) |
@@ -83,4 +85,4 @@ sip:...   any SIP address via the SIP account
 
 ## 6. Visual design
 
-Palette "Oasis": deep teal `#0F766E` (trust, calm; brand and security colour), warm sand `#B45309` / `#FBBF24` (family warmth, "not verified yet"), standard call green `#15803D` and red `#DC2626`. Dark call screen `#071311` so video is the focus. Light and dark themes follow the system. Avatars use 8 distinct hues with white initials. Status is never shown by colour alone: shield icons and words go with it. Large touch targets (call buttons 56–72 dp, keypad keys 76 dp).
+Palette (since 0.2.6) follows the familiar WhatsApp look so the family feels at home: teal-green bars `#008069` (dark mode `#1F2C34`), bright green accent `#00A884`, sent bubbles `#D9FDD3` / `#005C4B`, received bubbles white / `#202C33` on a warm `#EFEAE2` wallpaper (`#0B141A` dark), blue read ticks `#53BDEB`. Warm sand `#B45309` / `#FBBF24` for "not verified yet", standard call green `#15803D` and red `#DC2626`. Dark call screen `#0B141A` so video is the focus. Light and dark themes follow the system. Avatars use 8 distinct hues with white initials. Status is never shown by colour alone: shield icons and words go with it. Large touch targets (call buttons 56–72 dp, keypad keys 76 dp).

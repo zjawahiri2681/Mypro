@@ -52,11 +52,11 @@ fun ReadinessBanner() {
     val step = (if (tick >= 0) nextStep(ctx, skippedCamera) { list -> perms.launch(list.toTypedArray()) } else null) ?: return
     Card(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(step.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
-            Text(step.why, color = MaterialTheme.colorScheme.onSecondaryContainer, modifier = Modifier.padding(vertical = 6.dp))
+            Text(step.title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            Text(step.why, color = MaterialTheme.colorScheme.onTertiaryContainer, modifier = Modifier.padding(vertical = 6.dp))
             androidx.compose.foundation.layout.Row {
                 Button(step.action) { Text(step.button) }
                 if (step.skippable) androidx.compose.material3.TextButton({ skippedCamera = true }) { Text("Not now") }
