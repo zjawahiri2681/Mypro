@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val appVersionName = "0.2.7"
+val appVersionName = "0.2.8"
 val appVersionCode = (System.getenv("FAMILYTALK_VERSION_CODE") ?: "1").toInt()
 
 val keystoreProps = Properties().apply {
@@ -53,7 +53,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Shrinks unused library code (mostly unused icons) ~50 MB -> a few MB. No obfuscation.
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (releaseStoreFile != null) signingConfigs.getByName("release") else signingConfigs.getByName("debug")
         }
         debug {
@@ -73,6 +75,8 @@ android {
     packaging {
         resources.excludes += setOf("META-INF/INDEX.LIST", "META-INF/DEPENDENCIES", "META-INF/versions/9/OSGI-INF/MANIFEST.MF")
         jniLibs.useLegacyPackaging = true
+        // Compress code in the APK: much smaller download (Android 9+ would otherwise store it uncompressed).
+        dex.useLegacyPackaging = true
     }
     lint {
         checkReleaseBuilds = false
