@@ -68,22 +68,26 @@ jobs:
         id: collect
         run: |
           set -e
-          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          R=app/build/outputs/apk/release
+          ls -l $R
           VERSION=$(grep -oP 'val appVersionName = "\K[^"]+' app/build.gradle.kts)
-          OUT="FamilyTalk-v${VERSION}-build${{ github.run_number }}.apk"
-          mkdir -p dist && cp "$APK" "dist/$OUT"
-          sha256sum "dist/$OUT" | tee "dist/$OUT.sha256"
-          echo "apk=android/FamilyTalk/dist/$OUT" >> "$GITHUB_OUTPUT"
-          echo "sha=android/FamilyTalk/dist/$OUT.sha256" >> "$GITHUB_OUTPUT"
+          BASE="FamilyTalk-v${VERSION}-build${{ github.run_number }}"
+          mkdir -p dist
+          # Universal APK keeps the plain name (older app versions download the first .apk).
+          cp $R/*universal*.apk "dist/$BASE.apk"
+          cp $R/*arm64-v8a*.apk "dist/$BASE.compact-arm64.apk"
+          cp $R/*armeabi-v7a*.apk "dist/$BASE.compact-arm32.apk"
+          (cd dist && for f in *.apk; do sha256sum "$f" > "$f.sha256"; cat "$f.sha256"; done)
+          ls -l dist
+          echo "apk=android/FamilyTalk/dist/$BASE.apk" >> "$GITHUB_OUTPUT"
+          echo "sha=android/FamilyTalk/dist/$BASE.apk.sha256" >> "$GITHUB_OUTPUT"
           echo "tag=familytalk-v${VERSION}-build${{ github.run_number }}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
           name: FamilyTalk-apk
-          path: |
-            ${{ steps.collect.outputs.apk }}
-            ${{ steps.collect.outputs.sha }}
+          path: android/FamilyTalk/dist/*
           if-no-files-found: error
 
       - name: Unit test report
@@ -105,7 +109,9 @@ jobs:
           body: |
             FamilyTalk APK built from `${{ github.ref_name }}` @ ${{ github.sha }}.
             Install on each family phone (Android 9+): download the `.apk`, allow "install unknown apps" for your browser/file manager, open it.
+            Smaller download: `.compact-arm64.apk` fits almost every phone and tablet from the last 8 years; `.compact-arm32.apk` is for older 32-bit devices. The plain `.apk` works on all.
             Check the SHA-256 against the `.sha256` file before installing.
           files: |
             ${{ steps.collect.outputs.apk }}
             ${{ steps.collect.outputs.sha }}
+            android/FamilyTalk/dist/*.compact-*

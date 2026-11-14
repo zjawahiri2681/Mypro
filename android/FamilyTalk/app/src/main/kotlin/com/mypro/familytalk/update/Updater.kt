@@ -85,10 +85,20 @@ class Updater(private val context: Context, private val scope: CoroutineScope) {
             val tag = o["tag_name"]?.jsonPrimitive?.content ?: return@mapNotNull null
             val m = TAG.matchEntire(tag) ?: return@mapNotNull null
             val assets = (o["assets"] as? JsonArray)?.map { it.jsonObject } ?: return@mapNotNull null
-            val apk = assets.firstOrNull { it.name().endsWith(".apk") } ?: return@mapNotNull null
-            val sha = assets.firstOrNull { it.name().endsWith(".apk.sha256") }
+            // Prefer the compact APK built for this phone's processor; fall back to the universal one.
+            val apks = assets.filter { it.name().endsWith(".apk") }
+            val apk = apks.firstOrNull { it.name().endsWith(".compact-$abiTag.apk") }
+                ?: apks.firstOrNull { !it.name().contains(".compact-") } ?: return@mapNotNull null
+            val sha = assets.firstOrNull { it.name() == apk.name() + ".sha256" }
             UpdateInfo(m.groupValues[2].toInt(), m.groupValues[1], apk.url(), sha?.url(), apk["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0)
         }.maxByOrNull { it.build }
+    }
+
+    /** "arm64" or "arm32" for the compact APKs; anything else uses the universal APK. */
+    private val abiTag: String = when (Build.SUPPORTED_ABIS.firstOrNull()) {
+        "arm64-v8a" -> "arm64"
+        "armeabi-v7a" -> "arm32"
+        else -> "universal"
     }
 
     private suspend fun downloadNow(info: UpdateInfo) {

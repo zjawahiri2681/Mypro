@@ -7,7 +7,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
-val appVersionName = "0.2.6"
+val appVersionName = "0.2.7"
 val appVersionCode = (System.getenv("FAMILYTALK_VERSION_CODE") ?: "1").toInt()
 
 val keystoreProps = Properties().apply {
@@ -28,7 +28,16 @@ android {
         targetSdk = 35
         versionCode = appVersionCode
         versionName = appVersionName
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+    }
+
+    // One compact APK per processor type (about half the size) plus a universal one.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = true
+        }
     }
 
     signingConfigs {
