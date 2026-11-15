@@ -24,6 +24,14 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
+    <!-- Lets FamilyTalk find an app that can open a received document (Android 11+ package visibility). -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="*/*" />
+        </intent>
+    </queries>
+
     <application
         android:name=".FamilyTalkApp"
         android:allowBackup="false"

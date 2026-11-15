@@ -436,10 +436,15 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
     }
 
     /** Decrypts a stored file into a private cache folder so another app can open it. */
-    fun exportForViewing(handle: String, name: String): File? {
+    fun exportForViewing(handle: String, name: String, mime: String? = null): File? {
         val bytes = readFile(handle) ?: return null
         val dir = File(context.cacheDir, "open").apply { mkdirs() }
-        return File(dir, FileTransfer.sanitizeName(name)).also { it.writeBytes(bytes) }
+        var safe = FileTransfer.sanitizeName(name)
+        // Viewer apps often need the extension: add it from the type when the name has none.
+        if (!safe.contains('.') && mime != null) {
+            android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)?.let { safe = "$safe.$it" }
+        }
+        return File(dir, safe).also { it.writeBytes(bytes) }
     }
 
     /**

@@ -121,6 +121,8 @@ fun ChatScreen(app: FamilyTalkApp, nav: Nav, conv: String) {
     var attachOpen by remember { mutableStateOf(false) }
     var menuFor by remember { mutableStateOf<ChatMsg?>(null) }
     var viewing by remember { mutableStateOf<Pair<ChatMsg, Bitmap>?>(null) }
+    /** A normal photo shown inside the app (no other app needed). */
+    var photo by remember { mutableStateOf<Pair<ChatMsg, Bitmap>?>(null) }
     var saveAfterPick by remember { mutableStateOf<ChatMsg?>(null) }
     val list = rememberLazyListState()
 
@@ -215,7 +217,12 @@ fun ChatScreen(app: FamilyTalkApp, nav: Nav, conv: String) {
                                 f.localPath == null -> { app.chats.requestDownload(m); Toast.makeText(ctx, "Downloading…", Toast.LENGTH_SHORT).show() }
                                 f.viewOnce -> app.chats.openViewOnce(m)?.let { viewing = m to it }
                                     ?: Toast.makeText(ctx, "Can't show this photo", Toast.LENGTH_SHORT).show()
-                                else -> app.chats.exportForViewing(f.localPath ?: return@tap, f.name)?.let { openFile(ctx, it) }
+                                f.mime.startsWith("image/") -> {
+                                    val bmp = app.chats.loadBitmap(f.localPath ?: return@tap, 2048)
+                                    if (bmp != null) photo = m to bmp
+                                    else openOrSave(ctx, app, m)
+                                }
+                                else -> openOrSave(ctx, app, m)
                             }
                         },
                     )
@@ -264,6 +271,7 @@ fun ChatScreen(app: FamilyTalkApp, nav: Nav, conv: String) {
     }
 
     menuFor?.let { m -> MessageMenu(app, m, onDismiss = { menuFor = null }, onSave = { save(m) }) }
+    photo?.let { (m, bmp) -> PhotoViewer(bmp, m.file?.name ?: "Photo", onSave = { save(m) }) { photo = null } }
     viewing?.let { (m, bmp) ->
         ViewOnceViewer(bmp) { viewing = null; app.chats.finishViewOnce(m) }
     }
@@ -314,6 +322,20 @@ private fun MessageMenu(app: FamilyTalkApp, m: ChatMsg, onDismiss: () -> Unit, o
 private fun MenuRow(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null); Spacer(Modifier.size(16.dp)); Text(label, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+/** Full-screen photo viewer (inside the app). */
+@Composable
+private fun PhotoViewer(bmp: Bitmap, name: String, onSave: () -> Unit, onClose: () -> Unit) {
+    Dialog(onClose, DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(Color.Black).clickable(onClick = onClose)) {
+            androidx.compose.foundation.Image(bmp.asImageBitmap(), name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+            Row(Modifier.align(Alignment.TopEnd).padding(top = 36.dp, end = 8.dp)) {
+                IconButton(onSave) { Icon(Icons.Filled.Download, "Save to phone", tint = Color.White) }
+                IconButton(onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Close", tint = Color.White) }
+            }
+        }
     }
 }
 
@@ -436,17 +458,42 @@ private fun humanSize(b: Long) = when {
 /** Types that would install software or run code are never handed to another app. */
 private val blockedExtensions = setOf("apk", "apks", "xapk", "aab", "dex", "jar", "sh", "bat", "exe", "js", "html", "htm", "svg")
 
-private fun openFile(ctx: android.content.Context, f: File) {
+/**
+ * Opens a received file in another app. Uses the type the sender's phone reported (more
+ * reliable than guessing from the name). If no app on this phone handles it, the file is
+ * saved to Downloads/Gallery › FamilyTalk instead, so it is never "stuck".
+ */
+private fun openOrSave(ctx: android.content.Context, app: FamilyTalkApp, m: ChatMsg) {
+    val f = m.file ?: return
+    val handle = f.localPath ?: return
     // Trailing dots/spaces are ignored by Android, so "x.apk." still counts as .apk.
     val ext = f.name.trimEnd('.', ' ').substringAfterLast('.', "").lowercase()
     if (ext in blockedExtensions) {
         Toast.makeText(ctx, "For safety, FamilyTalk won't open .$ext files.", Toast.LENGTH_LONG).show(); return
     }
-    runCatching {
-        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
-        val mime = ctx.contentResolver.getType(uri) ?: "*/*"
-        ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Open with"))
-    }.onFailure { Toast.makeText(ctx, "No app can open this file", Toast.LENGTH_SHORT).show() }
+    val file = app.chats.exportForViewing(handle, f.name, f.mime)
+        ?: run { Toast.makeText(ctx, "This file is not on the phone any more. Long-press › Download again.", Toast.LENGTH_LONG).show(); return }
+    val result = runCatching {
+        val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
+        val mime = f.mime.takeIf { it.contains('/') && it != "application/octet-stream" }
+            ?: ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+        val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+        view.clipData = android.content.ClipData.newRawUri(f.name, uri)
+        if (view.resolveActivity(ctx.packageManager) == null && ctx.packageManager.queryIntentActivities(view, 0).isEmpty()) error("no viewer for $mime")
+        ctx.startActivity(Intent.createChooser(view, "Open with").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    }
+    result.onFailure { e ->
+        android.util.Log.w("FamilyTalk", "open failed: ${e.message}")
+        val saved = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) app.chats.saveToPhone(m) != null else false
+        Toast.makeText(
+            ctx,
+            if (saved) "No app on this phone opens .${ext.ifEmpty { "this" }} files, so it was saved to " +
+                (if (f.mime.startsWith("image/") || f.mime.startsWith("video/")) "Gallery" else "Downloads") + " › FamilyTalk. Open it from the Files app."
+            else "No app on this phone opens this file. Long-press it › Save to phone.",
+            Toast.LENGTH_LONG,
+        ).show()
+    }
 }
 
 private val EmojiGroups = listOf(
