@@ -1,0 +1,39 @@
+name: FamilyTalk live probe
+
+# Tests the real public relays and free TURN servers (needs internet; diagnostics only).
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "android/FamilyTalk/core/src/test/kotlin/com/mypro/familytalk/core/live/**"
+      - "android/FamilyTalk/tools/probe/**"
+      - ".github/workflows/familytalk-live-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: android/FamilyTalk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+      - name: TURN / STUN probe
+        continue-on-error: true
+        run: |
+          cd tools/probe && npm init -y >/dev/null && npm i puppeteer-core@22.15.0 >/dev/null 2>&1
+          node turn-probe.js
+      - name: Relay probe
+        continue-on-error: true
+        env:
+          FAMILYTALK_LIVE: "1"
+          FAMILYTALK_CORE_ONLY: "1"
+        run: |
+          ./gradlew :core:test --tests '*LiveRelayProbe*' --no-daemon --rerun-tasks -q || true
+          grep -h "PROBE" core/build/test-results/test/*.xml || echo "no probe output"
