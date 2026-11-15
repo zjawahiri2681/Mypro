@@ -342,7 +342,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         val now = System.currentTimeMillis()
         if (now - lastCheck < 2_000) return
         lastCheck = now
-        val turnConfigured = (family.roster.value?.relay?.ice.orEmpty() + fallbackTurn()).any { s -> s.urls.any { it.startsWith("turn") } }
+        val turnConfigured = family.roster.value?.relay?.ice.orEmpty().any { s -> s.urls.any { it.startsWith("turn") } }
         peers.values.forEach { peer ->
             val id = peer.peerId
             peerSince.putIfAbsent(id, now)
@@ -360,7 +360,7 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         }
         val pair = report.values.firstOrNull { it.type == "candidate-pair" && it.members["state"] == "succeeded" && it.members["nominated"] == true }
             ?: report.values.firstOrNull { it.type == "candidate-pair" && it.members["state"] == "succeeded" }
-        fun candType(key: String) = pair?.members?.get(key)?.let { report[it]?.members?.get("candidateType") as? String }
+        fun candType(key: String) = (pair?.members?.get(key) as? String)?.let { k -> report[k]?.members?.get("candidateType") as? String }
         val local = candType("localCandidateId"); val remote = candType("remoteCandidateId")
         val route = when {
             pair == null -> "no route yet"

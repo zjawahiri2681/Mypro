@@ -1,6 +1,6 @@
 name: FamilyTalk live probe
 
-# Tests the real public relays and free TURN servers (needs internet; diagnostics only).
+# Tests the real public relays and free TURN servers (needs internet; diagnostics only). Run 2.
 on:
   workflow_dispatch:
   push:

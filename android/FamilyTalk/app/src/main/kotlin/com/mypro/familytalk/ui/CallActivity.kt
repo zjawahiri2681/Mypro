@@ -178,6 +178,7 @@ private fun FamilyCall(app: FamilyTalkApp, c: CallUi) {
                 Text(if (c.echoTest) "Local test" else "End-to-end encrypted", color = Brand.TealLight, fontSize = 13.sp)
                 if (!c.echoTest) { Spacer(Modifier.width(10.dp)); TrustBadge(c.verified) }
             }
+            LinkInfo(c)
         }
         Spacer(Modifier.height(16.dp))
         // Body: video tiles or avatars
@@ -307,6 +308,20 @@ private fun CallControls(app: FamilyTalkApp, c: CallUi, onAdd: () -> Unit) {
  * One-to-one video: the other person fills the whole screen, your camera is a small
  * window in the corner, and the controls fade away after a few seconds (tap to show).
  */
+/** Live call check: route + voice/video arriving, and a plain warning when voice isn't getting through. */
+@Composable
+private fun LinkInfo(c: CallUi, center: Boolean = true) {
+    if (c.phase != CallPhase.CONNECTING && c.phase != CallPhase.ACTIVE) return
+    val align = if (center) TextAlign.Center else TextAlign.Start
+    c.peers.forEach { p ->
+        p.diag?.let { Text((if (c.peers.size > 1) "${p.name}: " else "") + it, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, textAlign = align) }
+        p.problem?.let {
+            Text(it, color = Brand.SandLight, fontSize = 13.sp, textAlign = align,
+                modifier = Modifier.padding(top = 4.dp).background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 4.dp))
+        }
+    }
+}
+
 @Composable
 private fun FullScreenVideo(app: FamilyTalkApp, c: CallUi, status: String, onAdd: () -> Unit) {
     val p = c.peers.first()
@@ -328,6 +343,9 @@ private fun FullScreenVideo(app: FamilyTalkApp, c: CallUi, status: String, onAdd
             ) { VideoView(app, local, mirror = app.calls.rtc.frontCamera, overlay = true) }
         }
 
+        if (!controls && p.problem != null) {
+            Column(Modifier.align(Alignment.TopStart).safeDrawingPadding().padding(16.dp)) { LinkInfo(c, center = false) }
+        }
         if (controls) {
             Column(
                 Modifier.align(Alignment.TopStart).fillMaxWidth()
@@ -341,6 +359,7 @@ private fun FullScreenVideo(app: FamilyTalkApp, c: CallUi, status: String, onAdd
                     Spacer(Modifier.width(4.dp))
                     Text("End-to-end encrypted", color = Brand.TealLight, fontSize = 13.sp)
                 }
+                LinkInfo(c, center = false)
             }
             Column(
                 Modifier.align(Alignment.BottomCenter).fillMaxWidth()
