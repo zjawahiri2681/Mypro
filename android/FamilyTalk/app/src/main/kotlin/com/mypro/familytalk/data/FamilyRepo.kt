@@ -269,13 +269,13 @@ class FamilyRepo(private val context: Context) {
         send(member, PrekeyAnnounce(signed))
     }
 
-    fun send(to: PublicIdentity, payload: Payload) {
-        messenger?.send(to, payload) ?: Log.w(TAG, "not connected; dropped ${payload::class.simpleName}")
+    fun send(to: PublicIdentity, payload: Payload, spread: Boolean = true) {
+        messenger?.send(to, payload, spread = spread) ?: Log.w(TAG, "not connected; dropped ${payload::class.simpleName}")
     }
 
-    fun sendToMember(memberId: String, payload: Payload) {
+    fun sendToMember(memberId: String, payload: Payload, spread: Boolean = true) {
         val id = roster.value?.byId(memberId)?.identity ?: return
-        send(id, payload)
+        send(id, payload, spread)
     }
 
     private fun dispatch(msg: Incoming) {

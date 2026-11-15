@@ -36,7 +36,16 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 
-data class PeerUi(val memberId: String, val name: String, val ext: Int?, val state: String, val video: VideoTrack?, val camOn: Boolean = true, val micOn: Boolean = true, val color: Int = 0)
+data class PeerUi(
+    val memberId: String, val name: String, val ext: Int?, val state: String, val video: VideoTrack?, val camOn: Boolean = true, val micOn: Boolean = true, val color: Int = 0,
+    /** Live check: route and how much voice/video is arriving, e.g. "Direct · voice in 31 kbps". */
+    val diag: String? = null,
+    /** Plain-language problem when voice is not arriving. */
+    val problem: String? = null,
+)
+
+/** Result of the live link check for one peer. */
+data class LinkCheck(val diag: String, val problem: String?)
 
 data class CallUi(
     val callId: String,
@@ -320,6 +329,68 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
 
     private var lastResend = 0L
 
+    // ---- live link check -----------------------------------------------------------------
+    private val linkChecks = mutableMapOf<String, LinkCheck>()
+    /** peerId -> (time, audio bytes in, video bytes in) at the previous check. */
+    private val linkBytes = mutableMapOf<String, Triple<Long, Long, Long>>()
+    private val peerSince = mutableMapOf<String, Long>()
+    private val silentSince = mutableMapOf<String, Long>()
+    private var lastCheck = 0L
+
+    /** Every 2 s: which route the call uses and whether voice/video is really arriving. */
+    private fun checkLinks() {
+        val now = System.currentTimeMillis()
+        if (now - lastCheck < 2_000) return
+        lastCheck = now
+        val turnConfigured = (family.roster.value?.relay?.ice.orEmpty() + fallbackTurn()).any { s -> s.urls.any { it.startsWith("turn") } }
+        peers.values.forEach { peer ->
+            val id = peer.peerId
+            peerSince.putIfAbsent(id, now)
+            peer.stats { report -> post { onStats(id, report, now, turnConfigured) } }
+        }
+    }
+
+    private fun onStats(id: String, report: Map<String, org.webrtc.RTCStats>, now: Long, turnConfigured: Boolean) {
+        if (!peers.containsKey(id)) return
+        fun num(v: Any?): Long = when (v) { is Number -> v.toLong(); is java.math.BigInteger -> v.toLong(); else -> 0 }
+        var audioIn = 0L; var videoIn = 0L
+        report.values.filter { it.type == "inbound-rtp" }.forEach { st ->
+            val b = num(st.members["bytesReceived"])
+            if (st.members["kind"] == "audio") audioIn += b else if (st.members["kind"] == "video") videoIn += b
+        }
+        val pair = report.values.firstOrNull { it.type == "candidate-pair" && it.members["state"] == "succeeded" && it.members["nominated"] == true }
+            ?: report.values.firstOrNull { it.type == "candidate-pair" && it.members["state"] == "succeeded" }
+        fun candType(key: String) = pair?.members?.get(key)?.let { report[it]?.members?.get("candidateType") as? String }
+        val local = candType("localCandidateId"); val remote = candType("remoteCandidateId")
+        val route = when {
+            pair == null -> "no route yet"
+            local == "relay" || remote == "relay" -> "via TURN relay"
+            local == "host" && remote == "host" -> "direct (same Wi-Fi)"
+            else -> "direct over internet"
+        }
+        val prev = linkBytes.put(id, Triple(now, audioIn, videoIn))
+        val secs = prev?.let { (now - it.first) / 1000.0 }?.takeIf { it > 0.5 }
+        val aKbps = if (prev != null && secs != null) ((audioIn - prev.second) * 8 / 1000.0 / secs).toInt() else 0
+        val vKbps = if (prev != null && secs != null) ((videoIn - prev.third) * 8 / 1000.0 / secs).toInt() else 0
+        val connected = peerState[id] == PeerConnection.PeerConnectionState.CONNECTED
+        if (connected && aKbps <= 0) silentSince.putIfAbsent(id, now) else if (aKbps > 0) silentSince.remove(id)
+        val fix = if (turnConfigured) "Try again on another network (Wi-Fi ↔ mobile data)."
+            else "Ask the family admin to add a TURN server: Settings › Relay & TURN servers."
+        val problem = when {
+            !connected && now - (peerSince[id] ?: now) > 15_000 ->
+                "Can't reach ${nameOf(id)} directly - your network is probably blocking calls. $fix"
+            connected && now - (silentSince[id] ?: now) > 6_000 ->
+                "Connected, but no voice is arriving from ${nameOf(id)}. The network may be blocking call audio. $fix"
+            else -> null
+        }
+        val diag = "$route · voice in $aKbps kbps" + if (video) " · video in $vKbps kbps" else ""
+        val old = linkChecks[id]
+        linkChecks[id] = LinkCheck(diag, problem)
+        if (old != linkChecks[id]) publish()
+    }
+
+    private fun nameOf(id: String) = family.roster.value?.byId(id)?.name ?: "them"
+
     /** Messages can still be lost (relay switch, sleep): re-send our offer + candidates every 3 s until answered. */
     private fun resendUnanswered() {
         val s = session ?: return
@@ -381,9 +452,10 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
         session = CallSession(callId, outgoing, System.currentTimeMillis())
         participants = people; video = withVideo
         joined.clear(); gone.clear(); peers.clear(); earlyIce.clear(); earlySdp.clear(); peerState.clear(); remoteMedia.clear()
+        linkChecks.clear(); linkBytes.clear(); peerSince.clear(); silentSince.clear()
         _ui.value = null
         ticker?.cancel(false)
-        ticker = exec.scheduleWithFixedDelay({ post { session?.let { event(CallEvent.Tick(System.currentTimeMillis())); resendUnanswered() } } }, 1, 1, TimeUnit.SECONDS)
+        ticker = exec.scheduleWithFixedDelay({ post { session?.let { event(CallEvent.Tick(System.currentTimeMillis())); resendUnanswered(); checkLinks() } } }, 1, 1, TimeUnit.SECONDS)
     }
 
     private fun finish(reason: String) {
@@ -416,7 +488,8 @@ class CallManager(private val context: Context, private val family: FamilyRepo, 
                 else -> "ringing"
             }
             val rm = remoteMedia[id]
-            PeerUi(id, m?.name ?: "Unknown", m?.ext, st, peers[id]?.remoteVideo, rm?.camera ?: video, rm?.mic ?: true, m?.color ?: 0)
+            val chk = linkChecks[id]
+            PeerUi(id, m?.name ?: "Unknown", m?.ext, st, peers[id]?.remoteVideo, rm?.camera ?: video, rm?.mic ?: true, m?.color ?: 0, chk?.diag, chk?.problem)
         }
         val title = if (others.size == 1) peerUis.first().name else "Family call (${others.size + 1})"
         val prev = _ui.value

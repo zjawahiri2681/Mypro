@@ -147,6 +147,8 @@ class MiniMqttRelay(
     }
 
     /** IPv4 first, then IPv6; each address gets its own short timeout. */
+    private val onAndroid = System.getProperty("java.vendor").orEmpty().contains("Android", ignoreCase = true)
+
     private fun openSocket(): Socket {
         val addrs = InetAddress.getAllByName(uri.host).sortedBy { if (it is Inet4Address) 0 else 1 }
         var last: Exception? = null
@@ -165,13 +167,16 @@ class MiniMqttRelay(
                     ssl.sslParameters = p
                 }
                 ssl.startHandshake()
-                if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(uri.host, ssl.session)) {
+                // The "HTTPS" endpoint check above already verifies the name on every platform; Android's
+                // default verifier is a real second check, desktop Java's always says no (so skip it there).
+                if (onAndroid && !HttpsURLConnection.getDefaultHostnameVerifier().verify(uri.host, ssl.session)) {
                     ssl.close(); throw javax.net.ssl.SSLPeerUnverifiedException("certificate is not for ${uri.host}")
                 }
                 return ssl
             } catch (e: Exception) {
                 runCatching { plain.close() }
-                last = e
+                // Keep the first (IPv4) error: it is the meaningful one; IPv6 is often just "unreachable".
+                if (last == null) last = e
             }
         }
         throw last ?: java.net.UnknownHostException(uri.host)

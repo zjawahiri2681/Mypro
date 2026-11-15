@@ -195,6 +195,12 @@ class Peer(val peerId: String, private val listener: Listener) {
         }, sdp)
     }
 
+    /** Raw WebRTC statistics (route in use, bytes received...), for the in-call check. */
+    fun stats(cb: (Map<String, org.webrtc.RTCStats>) -> Unit) {
+        if (closed) return
+        runCatching { pc.getStats { r -> cb(r.statsMap) } }
+    }
+
     fun close() {
         if (closed) return
         closed = true

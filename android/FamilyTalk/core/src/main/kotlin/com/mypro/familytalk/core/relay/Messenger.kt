@@ -62,7 +62,8 @@ class Messenger(
     fun stop() = relay.stop()
 
     /** Durable payloads (chat, files, roster) are queued by the broker for offline phones and locally while we are offline. */
-    fun send(to: PublicIdentity, payload: Payload, joining: Boolean = false) {
+    /** [spread]: file chunks go out on one relay each (first send); re-sends use every relay. */
+    fun send(to: PublicIdentity, payload: Payload, joining: Boolean = false, spread: Boolean = true) {
         val durable = isDurable(payload)
         val env = Sealed.seal(PayloadCodec.encode(payload), familyId(), me, to, clock(), prekey = if (joining) null else peerPrekey(to.memberId))
         val inner = json.encodeToString(Wire.serializer(), Wire(env, if (joining) me.public else null)).toByteArray()
@@ -70,7 +71,7 @@ class Messenger(
         val topic = Topics.inbox(familyId(), to.memberId)
         val brokerQueued = durable || queueAtBroker(payload)
         // File chunks are spread over the relays (not copied to all of them); the receiver asks for any it misses.
-        val sent = if (payload is FileChunk) relay.publishSpread(topic, wire, payload.index) else relay.publish(topic, wire, brokerQueued)
+        val sent = if (payload is FileChunk && spread) relay.publishSpread(topic, wire, payload.index) else relay.publish(topic, wire, brokerQueued)
         if (relay.connected.value && sent) return
         when {
             payload is FileChunk -> Unit // not queued locally: the receiver requests missing chunks with FileResend

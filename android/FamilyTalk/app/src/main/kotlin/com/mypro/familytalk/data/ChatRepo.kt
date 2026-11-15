@@ -297,7 +297,8 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
         family.scope.launch {
             val bytes = runCatching { vault.read(entry(p.fileId)) }.getOrNull() ?: return@launch
             val only = p.missing.takeIf { it.isNotEmpty() }?.toSet()
-            FileTransfer.chunks(p.fileId, bytes, only).forEach { family.sendToMember(from, it); delay(PACE_MS) }
+            // Re-sent pieces go out on every relay: the one used first may be the one this phone can't reach.
+            FileTransfer.chunks(p.fileId, bytes, only).forEach { family.sendToMember(from, it, spread = false); delay(PACE_MS) }
         }
     }
 
