@@ -405,7 +405,7 @@ class MultiRelay(val relays: List<MiniMqttRelay>) : Relay {
         else relays.mapNotNull { it.lastError.value }.distinct().joinToString("; ").ifBlank { null }
     }
 
-    /** e.g. "broker.hivemq.com:8883, mqtt.eclipseprojects.io:443" */
+    /** e.g. "broker.hivemq.com:8883, test.mosquitto.org:8886" */
     val connectedNames: String get() = relays.filter { it.connected.value }.joinToString { it.name }
 
     override fun start(inbox: String, onMessage: (ByteArray) -> Unit) = relays.forEach { it.start(inbox, onMessage) }

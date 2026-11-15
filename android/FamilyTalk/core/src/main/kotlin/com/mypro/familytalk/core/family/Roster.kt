@@ -50,7 +50,9 @@ data class RelayConfig(
         val PUBLIC_RELAYS = listOf(
             "ssl://broker.hivemq.com:8883",
             "wss://broker.hivemq.com:8884/mqtt",
-            "wss://mqtt.eclipseprojects.io:443/mqtt",
+            // Eclipse's public broker stopped answering (Nov 2026); Mosquitto's test broker passed the live probe.
+            "ssl://test.mosquitto.org:8886",
+            "wss://test.mosquitto.org:8081/mqtt",
         )
     }
 }

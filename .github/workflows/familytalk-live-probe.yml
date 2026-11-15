@@ -35,7 +35,6 @@ jobs:
         env:
           FAMILYTALK_LIVE: "1"
           FAMILYTALK_CORE_ONLY: "1"
-          FAMILYTALK_PROBE_RELAYS: "ssl://broker.emqx.io:8883,wss://broker.emqx.io:8084/mqtt,ssl://test.mosquitto.org:8886,wss://test.mosquitto.org:8081/mqtt"
         run: |
           ./gradlew :core:test --tests '*LiveRelayProbe*' --no-daemon --rerun-tasks -q || true
           grep -h "PROBE" core/build/test-results/test/*.xml || echo "no probe output"
