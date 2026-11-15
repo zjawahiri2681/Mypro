@@ -29,7 +29,8 @@ class LiveRelayProbe {
 
     @Test fun messageSizesPerRelay() {
         if (!live) return
-        for (url in RelayConfig.PUBLIC_RELAYS) {
+        val urls = System.getenv("FAMILYTALK_PROBE_RELAYS")?.split(",")?.filter { it.isNotBlank() } ?: RelayConfig.PUBLIC_RELAYS
+        for (url in urls) {
             val tag = Bytes.hex(Bytes.random(6))
             val inbox = "ftprobe/$tag"
             val got = Collections.synchronizedList(mutableListOf<Int>())
@@ -61,7 +62,7 @@ class LiveRelayProbe {
     }
 
     @Test fun endToEndFileOverAllRelays() {
-        if (!live) return
+        if (!live || System.getenv("FAMILYTALK_PROBE_RELAYS") != null) return
         val a = IdentityKeys.generate(); val b = IdentityKeys.generate()
         val fam = "probe-" + Bytes.hex(Bytes.random(4))
         val trusted = mapOf(a.memberId to a.public, b.memberId to b.public)
