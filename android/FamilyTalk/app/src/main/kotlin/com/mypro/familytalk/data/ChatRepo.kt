@@ -54,6 +54,7 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
     init {
         family.handlers += ::handle
         family.onRosterChanged = ::recordRosterChange
+        family.onRemoved = ::wipeAll
         // Decrypted copies made for "open file" never outlive the app process.
         File(context.cacheDir, "open").deleteRecursively()
         purgeOldViewOnceCopies()
@@ -117,9 +118,10 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     fun sendFile(conv: String, name: String, mime: String, bytes: ByteArray, viewOnce: Boolean = false) {
         family.scope.launch {
+            if (bytes.size > FileTransfer.INLINE_LIMIT) return@launch
             val (offer, chunks) = FileTransfer.prepare(if (viewOnce) "Photo.jpg" else name, mime, bytes, group = conv == FAMILY_CONV, viewOnce = viewOnce)
             // The sender keeps a copy so missed chunks can be re-sent; a view-once copy is hidden from the UI.
-            val path = store(offer.fileId, bytes)
+            val path = store(family.myId, offer.fileId, bytes)
             val info = FileInfo(offer.name, offer.mime, offer.size, if (viewOnce) null else path, 1f, offer.sha256, offer.chunks, viewOnce)
             mutate { it.copy(chats = it.chats + ChatMsg(offer.fileId, conv, family.myId, offer.sentAt, file = info, status = MsgStatus.SENT)) }
             val to = recipients(conv)
@@ -151,7 +153,8 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
     fun deleteForMe(msgs: List<ChatMsg>) {
         val keys = msgs.map { it.from + "|" + it.id }.toSet()
         msgs.forEach(::dropContent)
-        mutate { h -> h.copy(chats = h.chats.filterNot { (it.from + "|" + it.id) in keys }) }
+        val now = System.currentTimeMillis()
+        mutate { h -> h.copy(chats = h.chats.filterNot { (it.from + "|" + it.id) in keys }, tombstones = h.tombstones + keys.associateWith { now }) }
     }
 
     /** True if "delete for everyone" is offered for this message. */
@@ -171,7 +174,7 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     private fun dropContent(m: ChatMsg) {
         m.file?.localPath?.let(::deleteFile)
-        if (m.file != null) { deleteFile("vault:" + entry(m.id)); synchronized(lock) { downloads.remove(m.id) } }
+        if (m.file != null) { deleteStored(m.from, m.id); synchronized(lock) { downloads.remove(dkey(m.from, m.id)) } }
     }
 
     // ---- view once ----------------------------------------------------------------------
@@ -192,7 +195,7 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     private fun purgeOldViewOnceCopies() {
         val cutoff = System.currentTimeMillis() - 14 * DAY
-        _history.value.chats.filter { it.from == family.myId && it.file?.viewOnce == true && it.at < cutoff }.forEach { deleteFile("vault:" + entry(it.id)) }
+        _history.value.chats.filter { it.from == family.myId && it.file?.viewOnce == true && it.at < cutoff }.forEach { deleteStored(it.from, it.id) }
     }
 
     // ---- receiving ----------------------------------------------------------------------
@@ -221,9 +224,9 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
             is ViewedOnce -> {
                 val msg = find(p.fileId, family.myId) ?: return true
                 if (msg.file?.viewOnce != true || !canSee(from, msg)) return true
-                updateMsg(msg.id, msg.from) { it.copy(file = it.file?.copy(opened = true)) }
+                updateMsg(msg.id, msg.from) { it.copy(file = it.file?.let { f -> f.copy(opened = true, openedBy = f.openedBy + from) }) }
                 // In a 1-to-1 chat nobody else needs it any more.
-                if (msg.conv != FAMILY_CONV) deleteFile("vault:" + entry(msg.id))
+                if (msg.conv != FAMILY_CONV) deleteStored(msg.from, msg.id)
             }
             else -> return false
         }
@@ -242,7 +245,7 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     /** Starts (or resumes) receiving a file; returns false if too many are already running. */
     private fun startDownload(from: String, asm: FileTransfer.Assembly): Boolean {
-        val id = asm.offer.fileId
+        val id = dkey(from, asm.offer.fileId)
         val buffered = synchronized(lock) {
             if (downloads.containsKey(id)) return true
             if (downloads.values.count { it.from == from } >= 3 || downloads.size >= 6) return false
@@ -255,10 +258,10 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     private fun onChunk(from: String, p: FileChunk) {
         val d = synchronized(lock) {
-            downloads[p.fileId] ?: run {
+            downloads[dkey(from, p.fileId)] ?: run {
                 // Offer not here yet: keep the chunk for a few minutes (bounded memory).
                 if (find(p.fileId, from)?.file?.localPath == null && earlyBytes + p.data.length < MAX_EARLY_BYTES) {
-                    early.getOrPut(p.fileId) { mutableListOf() }.add(System.currentTimeMillis() to p)
+                    early.getOrPut(dkey(from, p.fileId)) { mutableListOf() }.add(System.currentTimeMillis() to p)
                     earlyBytes += p.data.length
                 }
                 return
@@ -269,10 +272,10 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
         runCatching { d.asm.add(p) }
         if (d.asm.received > before) d.lastProgress = System.currentTimeMillis()
         if (d.asm.complete) {
-            synchronized(lock) { if (downloads.remove(p.fileId) == null) return }
+            synchronized(lock) { if (downloads.remove(dkey(from, p.fileId)) == null) return }
             val result = runCatching { d.asm.finish() }
             result.onSuccess { bytes ->
-                val path = store(p.fileId, bytes)
+                val path = store(from, p.fileId, bytes)
                 updateMsg(p.fileId, from) { it.copy(status = if (it.status == MsgStatus.FAILED) MsgStatus.READ else it.status, file = it.file?.copy(localPath = path, progress = 1f)) }
             }.onFailure {
                 updateMsg(p.fileId, from) { it.copy(status = MsgStatus.FAILED, file = it.file?.copy(progress = 0f)) }
@@ -287,7 +290,8 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
     private fun onResend(from: String, p: FileResend) {
         val msg = find(p.fileId, family.myId) ?: return
         if (msg.deleted || !canSee(from, msg)) return
-        if (msg.file?.let { it.viewOnce && it.opened } == true && msg.conv != FAMILY_CONV) return
+        // A view-once photo is never sent again to someone who already opened it.
+        if (msg.file?.let { it.viewOnce && (from in it.openedBy || (it.opened && msg.conv != FAMILY_CONV)) } == true) return
         val key = "$from|${p.fileId}"
         val now = System.currentTimeMillis()
         synchronized(lock) {
@@ -295,7 +299,7 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
             served[key] = now
         }
         family.scope.launch {
-            val bytes = runCatching { vault.read(entry(p.fileId)) }.getOrNull() ?: return@launch
+            val bytes = readStored(family.myId, p.fileId) ?: return@launch
             val only = p.missing.takeIf { it.isNotEmpty() }?.toSet()
             // Re-sent pieces go out on every relay: the one used first may be the one this phone can't reach.
             FileTransfer.chunks(p.fileId, bytes, only).forEach { family.sendToMember(from, it, spread = false); delay(PACE_MS) }
@@ -304,11 +308,16 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     private fun onDelete(from: String, p: ChatDelete) {
         val now = System.currentTimeMillis()
-        p.msgIds.take(200).forEach { id ->
-            val msg = find(id, from)
-            if (msg == null) { mutate { h -> h.copy(tombstones = h.tombstones + ("$from|$id" to now)) }; return@forEach }
-            dropContent(msg)
-            updateMsg(id, from) { it.copy(text = null, file = null, deleted = true) }
+        val ids = p.msgIds.take(200).toSet()
+        val found = _history.value.chats.filter { it.from == from && it.id in ids }
+        found.forEach(::dropContent)
+        val missing = ids - found.map { it.id }.toSet()
+        // One save for the whole request.
+        mutate { h ->
+            h.copy(
+                chats = h.chats.map { if (it.from == from && it.id in ids) it.copy(text = null, file = null, deleted = true) else it },
+                tombstones = h.tombstones + missing.associate { "$from|$it" to now },
+            )
         }
     }
 
@@ -339,7 +348,7 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
     private fun waitingDownload(m: ChatMsg): Boolean {
         val f = m.file ?: return false
         return m.from != family.myId && !m.deleted && !f.opened && f.localPath == null && f.sha256 != null && m.status != MsgStatus.FAILED &&
-            System.currentTimeMillis() - m.at < 30 * DAY && synchronized(lock) { !downloads.containsKey(m.id) }
+            System.currentTimeMillis() - m.at < 30 * DAY && synchronized(lock) { !downloads.containsKey(dkey(m.from, m.id)) }
     }
 
     private fun resumeInterruptedDownloads() {
@@ -357,15 +366,15 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
         }
         val offer = FileOffer(m.id, f.name, f.mime, f.size, sha, f.chunks, m.at, m.conv == FAMILY_CONV, f.viewOnce)
         val asm = runCatching { FileTransfer.Assembly(offer) }.getOrNull() ?: return
-        synchronized(lock) { downloads[m.id]?.let { it.lastProgress = 0; it.lastAsk = 0; it.asks = 0 } }
+        synchronized(lock) { downloads[dkey(m.from, m.id)]?.let { it.lastProgress = 0; it.lastAsk = 0; it.asks = 0 } }
         if (m.status == MsgStatus.FAILED) updateMsg(m.id, m.from) { it.copy(status = MsgStatus.READ, file = it.file?.copy(progress = 0f)) }
         if (!startDownload(m.from, asm)) return
-        val d = synchronized(lock) { downloads[m.id]?.also { it.lastAsk = System.currentTimeMillis(); it.asks = 1 } } ?: return
+        val d = synchronized(lock) { downloads[dkey(m.from, m.id)]?.also { it.lastAsk = System.currentTimeMillis(); it.asks = 1 } } ?: return
         family.sendToMember(m.from, FileResend(m.id, d.asm.missing().take(2000)))
     }
 
     /** True while a file is actively being received (not just waiting). */
-    fun isDownloading(id: String) = synchronized(lock) { downloads[id]?.let { System.currentTimeMillis() - it.lastProgress < 60_000 } ?: false }
+    fun isDownloading(m: ChatMsg) = synchronized(lock) { downloads[dkey(m.from, m.id)]?.let { System.currentTimeMillis() - it.lastProgress < 60_000 } ?: false }
 
     private fun receive(msg: ChatMsg) {
         val visible = openConv == msg.conv
@@ -382,12 +391,33 @@ class ChatRepo(private val context: Context, private val family: FamilyRepo) {
 
     // ---- storage ------------------------------------------------------------------------
 
-    private fun entry(fileId: String) = "file-" + fileId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+    /** Downloads and stored files are keyed by sender AND file id, so one member can't overwrite another's file. */
+    private fun dkey(from: String, fileId: String) = "$from|$fileId"
+    private fun entry(from: String, fileId: String) = "f2-" + Bytes.hex(Bytes.sha256(Bytes.utf8(dkey(from, fileId)))).take(40)
+    /** Name used before 0.3.1 (file id only). */
+    private fun legacyEntry(fileId: String) = "file-" + fileId.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
 
     /** Files are kept inside the encrypted [Vault]; the returned handle is "vault:<entry>". */
-    private fun store(fileId: String, bytes: ByteArray): String {
-        vault.write(entry(fileId), bytes)
-        return "vault:" + entry(fileId)
+    private fun store(from: String, fileId: String, bytes: ByteArray): String {
+        vault.write(entry(from, fileId), bytes)
+        return "vault:" + entry(from, fileId)
+    }
+
+    private fun readStored(from: String, fileId: String): ByteArray? =
+        runCatching { vault.read(entry(from, fileId)) }.getOrNull()
+            ?: if (from == family.myId) runCatching { vault.read(legacyEntry(fileId)) }.getOrNull() else null
+
+    private fun deleteStored(from: String, fileId: String) {
+        vault.delete(entry(from, fileId))
+        if (from == family.myId) vault.delete(legacyEntry(fileId))
+    }
+
+    /** Removed from the family: nothing readable stays on this phone. */
+    private fun wipeAll() {
+        _history.value.chats.forEach { m -> m.file?.localPath?.let(::deleteFile); if (m.file != null) deleteStored(m.from, m.id) }
+        synchronized(lock) { downloads.clear(); early.clear(); earlyBytes = 0 }
+        mutate { History() }
+        File(context.cacheDir, "open").deleteRecursively()
     }
 
     fun readFile(handle: String): ByteArray? =

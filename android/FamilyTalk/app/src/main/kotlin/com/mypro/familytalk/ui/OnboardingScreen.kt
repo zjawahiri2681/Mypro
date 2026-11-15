@@ -150,9 +150,9 @@ fun WaitingForAdmissionScreen(app: FamilyTalkApp) {
             )
             if (online) TextButton({ app.family.sendJoinRequest() }) { Text("Send request again") }
             app.family.data.value.pinnedAdmin?.let { admin ->
-                Text("The admin's phone will show a number. It should start with:", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Join code - read all 20 digits to the admin; they must match the admin's screen:", textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    com.mypro.familytalk.core.crypto.SafetyNumber.format(com.mypro.familytalk.core.crypto.SafetyNumber.forPair(app.family.identity.public, admin)).take(23),
+                    com.mypro.familytalk.core.crypto.SafetyNumber.format(com.mypro.familytalk.core.crypto.SafetyNumber.joinCode(admin, app.family.identity.public)),
                     style = MaterialTheme.typography.titleLarge.copy(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                 )

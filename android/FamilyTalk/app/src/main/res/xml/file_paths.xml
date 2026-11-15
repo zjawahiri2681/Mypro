@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
     <files-path name="received" path="received/" />
+    <!-- Decrypted copies made only while another app opens a file (deleted on next start). -->
+    <cache-path name="open" path="open/" />
 </paths>

@@ -26,6 +26,8 @@ object FileTransfer {
         return offer to chunks(id, data)
     }
 
+    private fun countFor(size: Long, chunk: Int): Int = if (size == 0L) 1 else ((size + chunk - 1) / chunk).toInt()
+
     fun chunkCount(size: Int) = if (size == 0) 1 else (size + CHUNK - 1) / CHUNK
 
     /** Chunks of a stored file (all, or only [only]) for sending or re-sending. */
@@ -37,7 +39,7 @@ object FileTransfer {
     /** Strips paths and control characters so a received name can never escape the download folder. */
     fun sanitizeName(name: String): String {
         val base = name.substringAfterLast('/').substringAfterLast('\\')
-        val clean = base.filter { it.code >= 32 && it !in "<>:\"|?*" }.trim().trimStart('.')
+        val clean = base.filter { it.code >= 32 && it !in "<>:\"|?*" }.trim().trimStart('.').trimEnd('.', ' ')
         return clean.take(120).ifBlank { "file" }
     }
 
@@ -45,9 +47,11 @@ object FileTransfer {
         init {
             require(offer.size in 0..INLINE_LIMIT) { "bad size" }
             require(offer.chunks in 1..(INLINE_LIMIT / 1024 + 1)) { "bad chunk count" }
-            require(offer.chunks.toLong() * MAX_CHUNK >= offer.size) { "bad chunk count" }
+            // Exactly the count our (or an older 48 KiB) sender produces: no oversized assemblies.
+            require(offer.chunks == countFor(offer.size, CHUNK) || offer.chunks == countFor(offer.size, MAX_CHUNK)) { "bad chunk count" }
         }
         private val parts = arrayOfNulls<ByteArray>(offer.chunks)
+        private var bytes = 0L
         val received: Int get() = parts.count { it != null }
         val complete: Boolean get() = received == offer.chunks
         /** Chunk indices still missing. */
@@ -58,6 +62,9 @@ object FileTransfer {
             require(chunk.index in parts.indices) { "bad index" }
             val data = Bytes.unb64(chunk.data)
             require(data.size <= MAX_CHUNK) { "chunk too big" }
+            val old = parts[chunk.index]?.size ?: 0
+            require(bytes - old + data.size <= offer.size) { "more data than announced" }
+            bytes += data.size - old
             parts[chunk.index] = data
         }
 

@@ -90,7 +90,7 @@ class Updater(private val context: Context, private val scope: CoroutineScope) {
             val apk = apks.firstOrNull { it.name().endsWith(".compact-$abiTag.apk") }
                 ?: apks.firstOrNull { !it.name().contains(".compact-") } ?: return@mapNotNull null
             val sha = assets.firstOrNull { it.name() == apk.name() + ".sha256" }
-            UpdateInfo(m.groupValues[2].toInt(), m.groupValues[1], apk.url(), sha?.url(), apk["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0)
+            UpdateInfo(m.groupValues[2].toIntOrNull() ?: return@mapNotNull null, m.groupValues[1], apk.url(), sha?.url(), apk["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0)
         }.maxByOrNull { it.build }
     }
 

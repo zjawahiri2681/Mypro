@@ -119,7 +119,7 @@ class Messenger(
         if (!isDurable(payload) && signalNotBefore > 0 && env.ts < signalNotBefore) return
         // Phones with a wrong clock must still be able to chat and join; signalling stays strict.
         val skew = if (isDurable(payload)) DURABLE_FUTURE_SKEW else SIGNAL_FUTURE_SKEW
-        if (!guard.accept(env.from, env.id, env.ts, clock(), window, skew)) { log("dropped (time/replay) from ${env.from.take(8)}"); return }
+        if (!guard.accept(env.from, env.id, env.ts, clock(), window, skew, bucketName = if (known != null) env.from else ReplayGuard.STRANGERS)) { log("dropped (time/replay) from ${env.from.take(8)}"); return }
         onIncoming(Incoming(sender, payload, env.ts, known != null))
     }
 

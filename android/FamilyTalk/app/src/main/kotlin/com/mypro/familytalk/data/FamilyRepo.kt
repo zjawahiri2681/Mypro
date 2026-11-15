@@ -71,6 +71,9 @@ class FamilyRepo(private val context: Context) {
     /** Join requests waiting for the admin's "Allow" on screen. */
     val pendingJoins = MutableStateFlow<List<PendingJoin>>(emptyList())
 
+    /** Called when a valid roster no longer contains this phone (chat history is wiped). */
+    var onRemoved: () -> Unit = {}
+
     /** Called with (old, new) roster so the chat can record "X joined / was removed". */
     var onRosterChanged: (Roster?, Roster) -> Unit = { _, _ -> }
     var onJoinRequested: (String) -> Unit = {}
@@ -306,7 +309,12 @@ class FamilyRepo(private val context: Context) {
                     verified = d2.verified.filter { next.byId(it) != null }.toSet())
             }
             if (relayConfigChanged(next)) connect()
-            if (!stillIn) { events.tryEmit("You were removed from the family"); return }
+            if (!stillIn) {
+                // A removed (possibly stolen) phone keeps nothing readable: chats, files and keys go.
+                save { it.copy(prekeys = emptyList(), peerPrekeys = emptyMap(), myPrekey = null, invites = emptyList()) }
+                runCatching { onRemoved() }
+                events.tryEmit("You were removed from the family"); return
+            }
             onRosterChanged(old, next)
             if (old == null) maintainPrekeys(force = true)
             else next.members.filter { old.byId(it.id) == null && it.id != myId }.forEach { announcePrekeyTo(it.identity) }
@@ -323,7 +331,7 @@ class FamilyRepo(private val context: Context) {
         if (req.identity != from || System.currentTimeMillis() > invite.expiresAt) return
         if (!invite.checkProof(req.name, from, req.proof)) return
         if (pendingJoins.value.any { it.identity == from }) return
-        val safety = com.mypro.familytalk.core.crypto.SafetyNumber.forPair(identity.public, from)
+        val safety = com.mypro.familytalk.core.crypto.SafetyNumber.joinCode(identity.public, from)
         pendingJoins.update { it + PendingJoin(req.name, from, req, safety) }
         events.tryEmit("${req.name.take(40)} wants to join the family")
         onJoinRequested(req.name.take(40))

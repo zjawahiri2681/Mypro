@@ -59,6 +59,8 @@ data class FileInfo(
     val viewOnce: Boolean = false,
     /** View-once photo was opened (receiver: it is deleted; sender: the receiver saw it). */
     val opened: Boolean = false,
+    /** Sender side: members who opened this view-once photo (never sent to them again). */
+    val openedBy: Set<String> = emptySet(),
 )
 
 @Serializable

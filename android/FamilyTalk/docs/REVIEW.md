@@ -97,3 +97,23 @@ reviewer (WebRTC/VoIP) audited the call path.
 | Sleeping tablet: keep-alive timers stop in Doze, broker drops the link unnoticed | **Fixed (0.2.4)** — Doze-friendly wake-up alarm pings or reconnects; keep-alive 600 s |
 | Incoming-call channel could keep an old low importance; no mic permission check at answer; no audio focus; tablets without earpiece | **Fixed (0.2.4)** |
 | Only Google STUN: an estimated 25–40 % of mobile-data ↔ home-Wi-Fi calls cannot connect without TURN | **Partly fixed** — Google + Cloudflare STUN by default. **TURN needs a free account** (recommended: metered.ca, 20 GB/month, TURN over TLS on port 443); the admin enters it once in Settings › Relay & TURN servers and it is shared, signed, with every family phone. |
+
+## Round 3 — independent security review (0.3.0 → 0.3.1)
+
+| Finding | Severity | Status |
+|---|---|---|
+| Join check showed only the first 20 digits of the pair safety number; when the admin's id sorts first those digits come from the admin's key alone, so an impostor holding the invite could match them | High | **Fixed (0.3.1)** — new 20-digit join code derived from both keys (`SafetyNumber.joinCode`), shown in full on both phones |
+| Any branch push published a signed release that phones auto-install | High | **Fixed (0.3.1)** — only `main` and the working branch publish. Open: a separate release-signing key pinned in the app, and a protected GitHub environment |
+| Signing key exposed to third-party actions on movable tags | High | **Fixed (0.3.1)** — all actions pinned to commit SHAs; keystore deleted right after the build step |
+| Replay cache was one global list; strangers/one member could flush it and replay old invites/messages | Medium | **Fixed (0.3.1)** — per-sender caches, strangers in their own small bucket; delete-for-me leaves a tombstone |
+| Stored files and downloads keyed by file id only; a member could overwrite another sender's file | Medium | **Fixed (0.3.1)** — keyed by sender + file id |
+| Removed (possibly stolen) phone kept history, files and prekeys | Medium | **Fixed (0.3.1)** — wiped when a valid roster no longer lists the phone. Open: optional app PIN/biometric lock |
+| `linphone = 5.4.+` and no Gradle dependency verification | Medium | **Open** — pin once the resolved version is known; add verification metadata |
+| Opening a received file always failed (FileProvider path missing) | Low | **Fixed (0.3.1)** |
+| Oversized file offers / more data than announced could exhaust memory | Low | **Fixed (0.3.1)** — exact chunk count and running byte total enforced |
+| View-once photo in the family chat could be requested again after opening | Low | **Fixed (0.3.1)** — never re-sent to a member who opened it |
+| Delete-for-everyone rewrote the history once per message | Low | **Fixed (0.3.1)** — one save |
+| Blocked-extension check bypassed by a trailing dot (`x.apk.`) | Low | **Fixed (0.3.1)** |
+| Bad release tag could stop update checks; >25 MB file could crash the sender | Low | **Fixed (0.3.1)** |
+| Public relays can be flooded / see traffic timing; outer layer has no forward secrecy | Low | **Accepted / documented** — run your own broker (server/) for full control |
+| SIP password storage inside Linphone's config | Low | **Unverified** |

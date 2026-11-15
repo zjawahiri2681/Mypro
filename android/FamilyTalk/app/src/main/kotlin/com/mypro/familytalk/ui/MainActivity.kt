@@ -121,9 +121,9 @@ private fun JoinApprovals(app: FamilyTalkApp) {
         text = {
             androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
                 androidx.compose.material3.Text("Someone used your invite. Only allow it if you are sure it's them: compare these digits with their screen, in person or on a phone call.")
-                androidx.compose.material3.Text("Their phone should show this safety number on its waiting screen:")
+                androidx.compose.material3.Text("Their phone shows a join code on its waiting screen. All 20 digits must match:")
                 androidx.compose.material3.Text(
-                    com.mypro.familytalk.core.crypto.SafetyNumber.format(p.safety).take(23),
+                    com.mypro.familytalk.core.crypto.SafetyNumber.format(p.safety),
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
                     style = androidx.compose.ui.text.TextStyle(textDirection = androidx.compose.ui.text.style.TextDirection.Ltr),
                 )

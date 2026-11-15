@@ -154,4 +154,36 @@ class MessengerTest {
         ma.send(b.public, offer); chunks.forEach { ma.send(b.public, it) }
         assertEquals(1 + chunks.size, got.size)
     }
+
+    @Test fun joinCodeDependsOnBothKeysAndMatchesOnBothPhones() {
+        val admin = IdentityKeys.generate().public
+        val joiner = IdentityKeys.generate().public
+        val other = IdentityKeys.generate().public
+        val code = com.mypro.familytalk.core.crypto.SafetyNumber.joinCode(admin, joiner)
+        assertEquals(20, code.length)
+        assertEquals(code, com.mypro.familytalk.core.crypto.SafetyNumber.joinCode(admin, joiner))
+        assertNotEquals(code, com.mypro.familytalk.core.crypto.SafetyNumber.joinCode(admin, other))
+    }
+
+    @Test fun oneSenderCannotFlushAnotherSendersReplayCache() {
+        val g = ReplayGuard(capacity = 10)
+        assertTrue(g.accept("alice", "m1", 1000, now = 1000))
+        repeat(50) { g.accept("mallory", "x$it", 1000, now = 1000) }
+        repeat(50) { g.accept("stranger$it", "j", 1000, now = 1000, bucketName = ReplayGuard.STRANGERS) }
+        assertTrue(!g.accept("alice", "m1", 1000, now = 1000), "alice's message must still be remembered")
+        val restored = ReplayGuard(capacity = 10).also { it.restore(g.snapshot()) }
+        assertTrue(!restored.accept("alice", "m1", 1000, now = 1000))
+    }
+
+    @Test fun assemblyRejectsOversizedOffersAndExtraData() {
+        val (offer, chunks) = FileTransfer.prepare("a.bin", "x/y", ByteArray(100_000))
+        assertFailsWith<IllegalArgumentException> { FileTransfer.Assembly(offer.copy(chunks = 25_000)) }
+        // A 10-byte file has exactly one chunk, so a 3-chunk offer of 10 bytes is refused.
+        assertFailsWith<IllegalArgumentException> { FileTransfer.Assembly(offer.copy(size = 10)) }
+        // Chunks may not add up to more than the announced size.
+        val one = FileTransfer.prepare("b.bin", "x/y", ByteArray(10)).first
+        val asm = FileTransfer.Assembly(one)
+        assertFailsWith<IllegalArgumentException> { asm.add(chunks[0].copy(fileId = one.fileId)) }
+        assertTrue(chunks.size == offer.chunks)
+    }
 }

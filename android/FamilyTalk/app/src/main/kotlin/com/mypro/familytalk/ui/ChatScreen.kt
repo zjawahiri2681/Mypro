@@ -414,7 +414,7 @@ private fun FileContent(app: FamilyTalkApp, m: ChatMsg, mine: Boolean, p: ChatPa
                 have -> ""
                 m.status == MsgStatus.FAILED -> " · damaged, tap to download again"
                 mine -> ""
-                app.chats.isDownloading(m.id) -> " · downloading ${(f.progress * 100).toInt()}%"
+                app.chats.isDownloading(m) -> " · downloading ${(f.progress * 100).toInt()}%"
                 else -> " · tap to download"
             }
             Text(humanSize(f.size) + state, color = if (m.status == MsgStatus.FAILED) MaterialTheme.colorScheme.error else p.meta, fontSize = 12.sp)
@@ -437,8 +437,10 @@ private fun humanSize(b: Long) = when {
 private val blockedExtensions = setOf("apk", "apks", "xapk", "aab", "dex", "jar", "sh", "bat", "exe", "js", "html", "htm", "svg")
 
 private fun openFile(ctx: android.content.Context, f: File) {
-    if (f.extension.lowercase() in blockedExtensions) {
-        Toast.makeText(ctx, "For safety, FamilyTalk won't open .${f.extension} files.", Toast.LENGTH_LONG).show(); return
+    // Trailing dots/spaces are ignored by Android, so "x.apk." still counts as .apk.
+    val ext = f.name.trimEnd('.', ' ').substringAfterLast('.', "").lowercase()
+    if (ext in blockedExtensions) {
+        Toast.makeText(ctx, "For safety, FamilyTalk won't open .$ext files.", Toast.LENGTH_LONG).show(); return
     }
     runCatching {
         val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)

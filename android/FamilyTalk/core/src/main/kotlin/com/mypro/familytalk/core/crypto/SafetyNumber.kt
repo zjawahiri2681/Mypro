@@ -15,6 +15,23 @@ object SafetyNumber {
         return first + second
     }
 
+    /**
+     * 20-digit code the admin and a new joiner compare before the admin taps Allow.
+     * Unlike the first digits of [forPair], it depends on BOTH keys, so someone who only
+     * saw the invite cannot produce a key that shows the same digits (~2^66 tries).
+     */
+    fun joinCode(admin: PublicIdentity, joiner: PublicIdentity): String {
+        var h = Bytes.sha512(Bytes.utf8("ft-join-code-v1"), admin.signKeyBytes, admin.dhKeyBytes, joiner.signKeyBytes, joiner.dhKeyBytes)
+        repeat(ITERATIONS) { h = Bytes.sha512(h, admin.signKeyBytes, joiner.signKeyBytes) }
+        val sb = StringBuilder()
+        for (i in 0 until 4) {
+            var v = 0L
+            for (j in 0 until 5) v = (v shl 8) or (h[i * 5 + j].toLong() and 0xff)
+            sb.append("%05d".format(v % 100000))
+        }
+        return sb.toString()
+    }
+
     /** Groups of five digits for display: "12345 67890 ...". */
     fun format(number: String): String = number.chunked(5).joinToString(" ")
 
