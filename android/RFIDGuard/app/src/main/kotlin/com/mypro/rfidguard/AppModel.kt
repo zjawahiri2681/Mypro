@@ -15,6 +15,7 @@ import com.mypro.rfidguard.core.Hex
 import com.mypro.rfidguard.core.TagSnapshot
 import com.mypro.rfidguard.core.ndef.NdefRecordData
 import com.mypro.rfidguard.core.toHex
+import com.mypro.rfidguard.core.update.UpdateInfo
 import com.mypro.rfidguard.core.vault.AuditEntry
 import com.mypro.rfidguard.core.vault.SavedTag
 import com.mypro.rfidguard.core.vault.VaultData
@@ -44,6 +45,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var message by mutableStateOf<String?>(null)
     var lockScreenError by mutableStateOf<String?>(null)
     var vaultBroken by mutableStateOf(false)
+
+    /** A newer build found by "Check for updates", waiting for the owner's decision. */
+    var availableUpdate by mutableStateOf<UpdateInfo?>(null)
 
     /** Bumped when the vault key protection changes, so screens re-read it. */
     var vaultRevision by mutableIntStateOf(0)
@@ -80,6 +84,7 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         viewing = null
         pendingOp = null
         draft.clear()
+        availableUpdate = null
         message = null
         tab = Tab.SCAN
     }

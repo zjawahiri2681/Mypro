@@ -27,7 +27,7 @@ Google Drive > Second Brain > AGENTS.md. Read that first when Drive is connected
   Core parsers/protocol are pure JVM: `IPTVBOX_CORE_ONLY=1 ./gradlew :core:test` runs without the Android SDK.
 - `android/RFIDGuard/` - Android NFC/RFID tag reader, writer and security checker with an encrypted, biometric-locked vault.
   APK is built by `.github/workflows/rfidguard-build.yml` (release only on manual run). Core logic is pure JVM: `RFIDGUARD_CORE_ONLY=1 ./gradlew :core:test`.
-  No INTERNET permission, no key cracking, no UID/block-0 writing, no payment-card reading - keep it that way.
+  Internet only for the manual "Check for updates" button (GitHub releases); no background networking, no key cracking, no UID/block-0 writing, no payment-card reading - keep it that way.
 
 ## Desktop folders
 Filled in once this repo is shared through Remote Control. One line per folder:

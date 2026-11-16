@@ -163,7 +163,7 @@ fun SettingsScreen(model: AppModel, host: Host) {
             StatusRow(!status.rootSuspected, "No sign of root access", if (status.rootSuspected) "Root access lets other software read this app's memory while it is unlocked." else "A basic check found nothing; it cannot rule root out.")
             StatusRow(!status.usbDebugging, "USB debugging is off", if (status.usbDebugging) "Turn off USB debugging in developer options when you do not need it." else "Good.")
             if (status.debugBuild) StatusRow(false, "This is a debug build", "Debug builds are easier to inspect. Use the release build for real data.")
-            StatusRow(true, "No internet permission", "The app cannot connect to any network, so nothing it reads can be uploaded.")
+            StatusRow(true, "Internet used only for updates you ask for", "The app connects to GitHub only when you tap \"Check for updates\". It never connects in the background and never sends anything from the vault or from a tag.")
             StatusRow(true, "Screenshots and screen recording blocked", "The app's screens are also hidden in the recent-apps list.")
             StatusRow(true, "Excluded from cloud backup and device transfer", "Use the encrypted export below to move or protect your data.")
         }
@@ -195,6 +195,12 @@ fun SettingsScreen(model: AppModel, host: Host) {
             }
         }
 
+        SectionCard("Updates") {
+            Hint("Installed build: ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}). Nothing is checked or downloaded until you tap the button.")
+            Button(onClick = { host.checkForUpdate() }, enabled = !model.busy) { Text("Check for updates") }
+            Hint("A download is checked against its published checksum and against this app's signing key before Android's installer is opened. You confirm the install yourself. Your vault is kept.")
+        }
+
         SectionCard("Danger zone") {
             OutlinedButton(onClick = { confirmWipe = true }) { Text("Destroy vault", color = MaterialTheme.colorScheme.error) }
             Hint("Deletes every saved tag, key, tag password and the vault key itself.")
@@ -215,6 +221,13 @@ fun SettingsScreen(model: AppModel, host: Host) {
         },
         onDismiss = { backup = BackupAction.NONE },
     )
+    model.availableUpdate?.let { info ->
+        ConfirmDialog(
+            "Update available", "Build ${info.build} (version ${info.versionName}) is available, about ${(info.sizeBytes + 524_288) / 1_048_576} MB. Download it from GitHub and open Android's installer?", "Download",
+            onConfirm = { model.availableUpdate = null; host.installUpdate(info) },
+            onDismiss = { model.availableUpdate = null },
+        )
+    }
     if (confirmImport) ConfirmDialog(
         "Replace the vault with a backup?", "Everything currently in the vault is replaced by the content of the backup file. Export the current vault first if you may need it.", "Choose backup", danger = true,
         onConfirm = { confirmImport = false; backup = BackupAction.IMPORT },

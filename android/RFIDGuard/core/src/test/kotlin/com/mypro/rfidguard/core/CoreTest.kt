@@ -336,4 +336,26 @@ class CoreTest {
         assertEquals("STMicroelectronics", TagIdentity.manufacturer(Hex.decode("0102030405" + "0002E0").let { Hex.decode("1122334455" + "6602E0") }, true))
         assertEquals("MIFARE DESFire / NTAG 4xx / Plus", TagIdentity.typeFromSak(0x20, Hex.decode("4403")))
     }
+
+    // ---- update check ----
+    @Test fun updateCheck() {
+        val base = com.mypro.rfidguard.core.update.UpdateCheck.DOWNLOAD_PREFIX
+        fun rel(tag: String, apk: String, sha: String, extra: String = "") =
+            """{"tag_name":"$tag","draft":false,"prerelease":false$extra,"assets":[{"browser_download_url":"$apk","size":7000000},{"browser_download_url":"$sha","size":90}]}"""
+        val good5 = rel("rfidguard-v1.0.0-build5", "${base}rfidguard-v1.0.0-build5/RFIDGuard-v1.0.0-build5.apk", "${base}rfidguard-v1.0.0-build5/RFIDGuard-v1.0.0-build5.apk.sha256")
+        val good9 = rel("rfidguard-v1.1.0-build9", "${base}rfidguard-v1.1.0-build9/RFIDGuard-v1.1.0-build9.apk", "${base}rfidguard-v1.1.0-build9/RFIDGuard-v1.1.0-build9.apk.sha256")
+        val iptv = rel("v1.0.0-build40", "${base}v1.0.0-build40/IPTVBox.apk", "${base}v1.0.0-build40/IPTVBox.apk.sha256")
+        val evilHost = rel("rfidguard-v9.0.0-build99", "https://evil.example/rfidguard-v9.0.0-build99/x.apk", "https://evil.example/x.apk.sha256")
+        val evilPath = rel("rfidguard-v9.0.0-build98", "${base}rfidguard-v9.0.0-build98/../../../other/repo/x.apk", "${base}rfidguard-v9.0.0-build98/x.apk.sha256")
+        val draft = rel("rfidguard-v9.0.0-build97", "${base}rfidguard-v9.0.0-build97/a.apk", "${base}rfidguard-v9.0.0-build97/a.apk.sha256").replace("\"draft\":false", "\"draft\":true")
+        val json = "[$iptv,$good5,$evilHost,$good9,$evilPath,$draft,42,{}]"
+        val u = com.mypro.rfidguard.core.update.UpdateCheck
+        assertEquals(9, u.latest(json)!!.build)
+        assertEquals("1.1.0", u.latest(json)!!.versionName)
+        assertEquals(9, u.newerThan(json, 5)!!.build)
+        assertNull(u.newerThan(json, 9)); assertNull(u.newerThan(json, 12))
+        assertNull(u.latest("not json")); assertNull(u.latest("{}")); assertNull(u.latest("[]"))
+        assertEquals("ab".repeat(32), u.parseSha256("AB".repeat(32) + "  RFIDGuard.apk\n"))
+        assertNull(u.parseSha256("<html>not found</html>"))
+    }
 }

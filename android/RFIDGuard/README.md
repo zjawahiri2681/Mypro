@@ -36,7 +36,7 @@ Links are never opened automatically; dangerous link types are refused outright.
 
 | Area | Measure |
 | --- | --- |
-| Network | No `INTERNET` permission. Nothing read from a tag can leave the phone over the network. |
+| Network | Internet is used for one thing: the "Check for updates" button, which contacts GitHub (HTTPS only, system certificates only) when tapped. No background networking; nothing from the vault or a tag is ever sent. |
 | Storage | One vault file, AES-256-GCM, random 256-bit data key. The data key is wrapped by a non-exportable Android Keystore key (StrongBox when available). |
 | Unlock | On a phone with a screen lock, the Keystore key requires biometric (class 3) or screen-lock authentication **for every use**, enforced by secure hardware, not by app code. A vault created before a screen lock existed is bound to it at the next unlock. Without any screen lock the vault is encrypted but opens without a prompt - the app says so. |
 | In memory | The vault is decrypted only while unlocked. Auto-lock on screen-off and after a background timeout (immediately / 1 min / 5 min); the data key is zeroed on lock and decrypted objects are released (the JVM cannot guarantee immediate erasure of released memory). |
@@ -45,6 +45,12 @@ Links are never opened automatically; dangerous link types are refused outright.
 | Tag input | Tags are untrusted input. No NFC intent filters, so a tag cannot launch the app or feed it data while closed or locked. Parsers are bounded and fuzz-tested. |
 | Writes | Need an explicit, expiring (45 s) request. Erase, lock, password, restore and block writes are bound to the UID that was scanned and need re-authentication. Logged in an encrypted activity log. |
 | Clipboard | Copied values are flagged sensitive and cleared after 30 s if still on the clipboard. |
+
+### Updates
+Security → Updates → "Check for updates" asks GitHub for the newest RFID Guard release. If one exists and you agree,
+the app downloads it into its private cache, verifies the SHA-256 checksum, package name, version and signing
+certificate, then opens Android's installer for you to confirm. This needs a published release (run the workflow by
+hand) and the permanent signing key described under "Signing"; builds signed with one-off keys cannot update each other.
 
 ### Deliberately not included
 - No key cracking (nested / darkside / dictionary attacks) and no bundled list of leaked keys.

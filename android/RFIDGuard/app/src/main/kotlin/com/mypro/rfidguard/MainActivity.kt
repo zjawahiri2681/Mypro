@@ -27,12 +27,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
+import com.mypro.rfidguard.core.update.UpdateInfo
 import com.mypro.rfidguard.core.vault.ExportCodec
 import com.mypro.rfidguard.core.vault.VaultData
 import com.mypro.rfidguard.security.Auth
 import com.mypro.rfidguard.security.DeviceStatus
 import com.mypro.rfidguard.security.KeystoreVault
 import com.mypro.rfidguard.ui.AppRoot
+import com.mypro.rfidguard.update.Updater
 import com.mypro.rfidguard.ui.RfidTheme
 import java.security.GeneralSecurityException
 import java.text.SimpleDateFormat
@@ -55,6 +57,8 @@ interface Host {
     fun openLink(uri: String)
     fun openNfcSettings()
     fun copySensitive(label: String, text: String)
+    fun checkForUpdate()
+    fun installUpdate(info: UpdateInfo)
 }
 
 class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
@@ -335,6 +339,44 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
             }
         }, CLIPBOARD_CLEAR_MS)
         model.message = "Copied. The clipboard is cleared again in ${CLIPBOARD_CLEAR_MS / 1000} seconds."
+    }
+
+    override fun checkForUpdate() {
+        if (model.busy) return
+        model.busy = true
+        thread {
+            val result = runCatching { Updater.check(BuildConfig.VERSION_CODE) }
+            runOnUiThread {
+                model.busy = false
+                if (model.data == null) return@runOnUiThread
+                val info = result.getOrNull()
+                if (result.isFailure) model.message = "Could not check for updates. Check the internet connection and try again."
+                else if (info == null) model.message = "You have the latest build (${BuildConfig.VERSION_CODE})."
+                else model.availableUpdate = info
+            }
+        }
+    }
+
+    override fun installUpdate(info: UpdateInfo) {
+        if (model.busy) return
+        model.busy = true
+        thread {
+            val result = runCatching { Updater.download(applicationContext, info, BuildConfig.VERSION_CODE) }
+            runOnUiThread {
+                model.busy = false
+                val apk = result.getOrNull()
+                val error = result.exceptionOrNull()
+                if (apk == null) {
+                    model.message = if (error is Updater.Rejected) error.message else "The download failed. Check the internet connection and try again."
+                    return@runOnUiThread
+                }
+                try {
+                    startActivity(Updater.installIntent(this, apk))
+                } catch (e: Exception) {
+                    model.message = "Android's installer could not be opened."
+                }
+            }
+        }
     }
 
     private companion object {
