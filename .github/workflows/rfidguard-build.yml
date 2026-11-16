@@ -19,8 +19,10 @@ jobs:
   build:
     name: Test and build APK
     runs-on: ubuntu-latest
-    permissions:
-      contents: ${{ github.event_name == 'workflow_dispatch' && 'write' || 'read' }}
+    outputs:
+      tag: ${{ steps.collect.outputs.tag }}
+      version: ${{ steps.collect.outputs.version }}
+      stable: ${{ steps.signing.outputs.stable }}
     defaults:
       run:
         working-directory: android/RFIDGuard
@@ -109,15 +111,26 @@ jobs:
           path: android/RFIDGuard/core/build/reports/tests/test
           if-no-files-found: ignore
 
-      # This repository is public, so a release is a public download. It is only published when the
-      # workflow is started by hand (Actions -> Build RFID Guard APK -> Run workflow). Pushes build
-      # and test, and leave the APK as a workflow artifact (downloadable by signed-in GitHub users).
-      - name: Publish GitHub release with the APK
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
+  # This repository is public, so a release is a public download. It is only published when the
+  # workflow is started by hand (Actions -> Build RFID Guard APK -> Run workflow). Pushes build
+  # and test, and leave the APK as a workflow artifact (downloadable by signed-in GitHub users).
+  release:
+    name: Publish GitHub release
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
         with:
-          tag_name: ${{ steps.collect.outputs.tag }}
-          name: RFID Guard ${{ steps.collect.outputs.version }} (build ${{ github.run_number }})
+          name: RFIDGuard-apk
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.tag }}
+          name: RFID Guard ${{ needs.build.outputs.version }} (build ${{ github.run_number }})
           target_commitish: ${{ github.sha }}
           body: |
             Android APK built from `${{ github.ref_name }}` @ ${{ github.sha }}. Needs Android 11 or newer and NFC.
@@ -125,8 +138,8 @@ jobs:
             Install: download the `.apk` below onto the phone, allow "unknown sources" for the installer, open it.
             Check the SHA-256 against the `.sha256` file before installing.
 
-            Signed with the repository's release key: ${{ steps.signing.outputs.stable }}. When `false`, this build used a one-off key and
+            Signed with the repository's release key: ${{ needs.build.outputs.stable }}. When `false`, this build used a one-off key and
             cannot be installed over another build; export an encrypted backup in the app before switching builds.
           files: |
-            ${{ steps.collect.outputs.apk }}
-            ${{ steps.collect.outputs.sha }}
+            dist/*.apk
+            dist/*.sha256
