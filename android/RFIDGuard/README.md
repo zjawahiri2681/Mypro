@@ -23,10 +23,12 @@ Links are never opened automatically; dangerous link types are refused outright.
 
 **Write**
 - Compose and write NDEF (text, link, phone, e-mail, Wi-Fi, contact, location, app launch); several records per tag.
-- Every write is read back and compared before success is reported.
+- NDEF, page and data-block writes are read back and compared before success is reported. Where a read-back is
+  impossible (first-time formatting, sector trailers, blocks the key cannot read) the result says so.
 - Erase, permanent lock (read-only), restore a saved copy.
 - Password-protect NTAG21x / Ultralight EV1 with a random per-tag password kept in the vault; remove it again.
-- MIFARE Classic block write with access-bit validation.
+- MIFARE Classic block write with access-bit validation. Card keys are stored per card and only ever presented
+  to the card they were added for, so a fake card cannot harvest them.
 - Optional **authenticity seal**: an extra record holding HMAC-SHA256 (truncated to 128 bits) over the tag UID and
   content, so the app can later tell whether content was edited or copied to a different tag.
 
@@ -36,13 +38,13 @@ Links are never opened automatically; dangerous link types are refused outright.
 | --- | --- |
 | Network | No `INTERNET` permission. Nothing read from a tag can leave the phone over the network. |
 | Storage | One vault file, AES-256-GCM, random 256-bit data key. The data key is wrapped by a non-exportable Android Keystore key (StrongBox when available). |
-| Unlock | The Keystore key requires biometric (class 3) or screen-lock authentication **for every use**, enforced by secure hardware, not by app code. |
-| In memory | Decrypted data exists only while unlocked. Auto-lock on screen-off and after a background timeout (immediately / 1 min / 5 min); the data key is zeroed on lock. |
-| Screen | `FLAG_SECURE` (no screenshots, recording or recents preview); touches through overlays are ignored; other apps' overlays are hidden on Android 12+. |
+| Unlock | On a phone with a screen lock, the Keystore key requires biometric (class 3) or screen-lock authentication **for every use**, enforced by secure hardware, not by app code. A vault created before a screen lock existed is bound to it at the next unlock. Without any screen lock the vault is encrypted but opens without a prompt - the app says so. |
+| In memory | The vault is decrypted only while unlocked. Auto-lock on screen-off and after a background timeout (immediately / 1 min / 5 min); the data key is zeroed on lock and decrypted objects are released (the JVM cannot guarantee immediate erasure of released memory). |
+| Screen | `FLAG_SECURE` (no screenshots, recording or recents preview). On Android 12+ other apps' overlays are hidden while the app is on screen; on Android 11 touches through an overlay are ignored on the main screen only. |
 | Backups | Excluded from Android cloud backup and device transfer. Manual export is passphrase-encrypted (PBKDF2-HMAC-SHA256, 600,000 rounds, AES-256-GCM, authenticated header). |
 | Tag input | Tags are untrusted input. No NFC intent filters, so a tag cannot launch the app or feed it data while closed or locked. Parsers are bounded and fuzz-tested. |
-| Writes | Need an explicit, expiring (45 s) request; destructive ones are bound to the UID that was scanned and need re-authentication. Logged in an encrypted activity log. |
-| Clipboard | Copied values are flagged sensitive and cleared after 30 s. |
+| Writes | Need an explicit, expiring (45 s) request. Erase, lock, password, restore and block writes are bound to the UID that was scanned and need re-authentication. Logged in an encrypted activity log. |
+| Clipboard | Copied values are flagged sensitive and cleared after 30 s if still on the clipboard. |
 
 ### Deliberately not included
 - No key cracking (nested / darkside / dictionary attacks) and no bundled list of leaked keys.
@@ -53,8 +55,11 @@ These would make the app a cloning tool for other people's credentials rather th
 
 ### Honest limits
 - NTAG / Ultralight EV1 passwords are 32 bits and travel unencrypted; they stop casual tampering, not a prepared attacker.
-  The app protects from page 4 on, so the static lock bits remain outside the protected area.
-- The authenticity seal and the NXP originality check cannot detect a copy on a chip that also fakes the UID.
+  The password is sent to any chip that presents the right UID and reports itself protected, so a purpose-built
+  emulator can capture it. Write-only protection covers the whole chip; "hide content" protection starts at page 4,
+  which leaves the lock bits outside the protected area.
+- The authenticity seal and the NXP originality check cannot detect a copy on a chip that also fakes the UID, and
+  the seal cannot tell an older sealed version of the same tag's content from the current one.
 - MIFARE Classic's cipher is broken; the app says so on every Classic scan. Do not rely on it for access control.
 - Removing or resetting the phone's screen lock destroys the vault key. Keep an encrypted export.
 - Root detection is advisory. On a rooted or compromised phone, no app can protect data while it is unlocked.

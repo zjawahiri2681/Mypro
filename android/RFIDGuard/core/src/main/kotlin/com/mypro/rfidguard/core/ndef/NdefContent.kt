@@ -31,7 +31,9 @@ object NdefContents {
         "urn:epc:tag:", "urn:epc:pat:", "urn:epc:raw:", "urn:epc:", "urn:nfc:",
     )
 
-    fun decode(r: NdefRecordData): NdefContent {
+    fun decode(r: NdefRecordData): NdefContent = decode(r, 0)
+
+    private fun decode(r: NdefRecordData, depth: Int): NdefContent {
         val type = String(r.type, Charsets.US_ASCII)
         return try {
             when (r.tnf) {
@@ -39,7 +41,7 @@ object NdefContents {
                 NdefRecordData.TNF_WELL_KNOWN -> when (type) {
                     "T" -> decodeText(r.payload)
                     "U" -> NdefContent.Uri(decodeUri(r.payload))
-                    "Sp" -> decodeSmartPoster(r.payload)
+                    "Sp" -> if (depth >= 1) NdefContent.Unknown(r.tnf, type) else decodeSmartPoster(r.payload, depth)
                     else -> NdefContent.Unknown(r.tnf, type)
                 }
                 NdefRecordData.TNF_MIME -> when {
@@ -56,7 +58,8 @@ object NdefContents {
                 }
                 else -> NdefContent.Unknown(r.tnf, type)
             }
-        } catch (e: RuntimeException) {
+        } catch (e: Exception) {
+            // A tag is hostile input: nothing malformed may escape as an exception.
             NdefContent.Unknown(r.tnf, type)
         }
     }
@@ -78,11 +81,11 @@ object NdefContents {
         return prefix + String(p, 1, p.size - 1, Charsets.UTF_8)
     }
 
-    private fun decodeSmartPoster(p: ByteArray): NdefContent {
+    private fun decodeSmartPoster(p: ByteArray, depth: Int): NdefContent {
         var uri: String? = null
         var title: String? = null
         for (inner in NdefCodec.parse(p)) {
-            when (val c = decode(inner)) {
+            when (val c = decode(inner, depth + 1)) {
                 is NdefContent.Uri -> if (uri == null) uri = c.uri
                 is NdefContent.Text -> if (title == null) title = c.text
                 else -> {}

@@ -42,8 +42,28 @@ internal class Type2Link(private val nfcA: NfcA) {
     private fun command(expectedSize: Int, vararg bytes: Int): ByteArray? {
         val r = transceive(*bytes)
         if (r != null && r.size == expectedSize) return r
-        reconnect()
+        // Some controllers report an unanswered command as a lost tag; a failed reconnect here
+        // must not abort the caller, the next command simply fails as well.
+        try { reconnect() } catch (_: IOException) {}
         return null
+    }
+
+    enum class Access { OPEN, AUTHENTICATED, DENIED }
+
+    /**
+     * Sends the password only when the tag really is protected. A wrong PWD_AUTH counts against the
+     * chip's attempt limit when one is configured, so it is never sent to an open tag.
+     */
+    @Throws(IOException::class)
+    fun unlockIfProtected(spec: com.mypro.rfidguard.core.type2.Type2Spec, password: TagPassword?): Access {
+        val page = spec.configPage ?: return Access.OPEN
+        val cfg = fastRead(page, page + 1)
+        if (cfg != null) {
+            val c = Type2.config(cfg.copyOfRange(0, 4), cfg.copyOfRange(4, 8))
+            if (c != null && !c.protectionActive(spec.totalPages)) return Access.OPEN
+        }
+        if (password == null) return Access.DENIED
+        return if (authenticate(password)) Access.AUTHENTICATED else Access.DENIED
     }
 
     @Throws(IOException::class)

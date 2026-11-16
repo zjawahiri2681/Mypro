@@ -42,6 +42,7 @@ object TagAudit {
                         passwordProtected = true
                         val scope = if (cfg.readProtected) "reading and writing" else "writing"
                         out += Finding(Severity.GOOD, "Password protection is on", "A password is needed for $scope from page ${cfg.auth0}. " +
+                            (if (cfg.auth0 > 2) "The lock bits lie outside the protected area, so someone could still make the tag permanently read-only. " else "") +
                             "The chip's password is only 32 bits and travels unencrypted, so it stops casual tampering, not a determined attacker with a sniffer.")
                         if (cfg.authLimit == 0) out += Finding(Severity.LOW, "Unlimited password attempts", "The chip does not limit wrong password attempts, so the password can be brute-forced with patience.")
                     }

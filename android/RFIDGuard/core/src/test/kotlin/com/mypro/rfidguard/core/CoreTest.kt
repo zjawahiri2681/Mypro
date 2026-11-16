@@ -73,8 +73,16 @@ class CoreTest {
         val rnd = SecureRandom()
         repeat(2000) {
             val b = ByteArray(rnd.nextInt(40)).also(rnd::nextBytes)
-            try { NdefCodec.parse(b).forEach(NdefContents::decode) } catch (_: NdefFormatException) {}
+            try { NdefCodec.parse(b) } catch (_: NdefFormatException) {}
+            // decode must never throw, whatever the payload
+            for (type in listOf("Sp", "T", "U")) NdefContents.decode(NdefRecordData(NdefRecordData.TNF_WELL_KNOWN, type.toByteArray(), payload = b))
+            NdefContents.decode(NdefContents.mime(NdefContents.WIFI_MIME, b))
         }
+        // malformed and nested smart posters
+        assertIs<NdefContent.Unknown>(NdefContents.decode(NdefRecordData(NdefRecordData.TNF_WELL_KNOWN, "Sp".toByteArray(), payload = byteArrayOf(0x11))))
+        var nested = NdefCodec.encode(listOf(NdefContents.uri("https://example.com")))
+        repeat(50) { nested = NdefCodec.encode(listOf(NdefRecordData(NdefRecordData.TNF_WELL_KNOWN, "Sp".toByteArray(), payload = nested))) }
+        NdefContents.decode(NdefCodec.parse(nested).single())
     }
 
     @Test fun wifiAndVcardAndSmartPoster() {
@@ -128,6 +136,8 @@ class CoreTest {
         assertNotNull(Classic.validateTrailerForWrite(Hex.decode("FFFFFFFFFFFF" + "00000000" + "FFFFFFFFFFFF")))
         // 110 for the trailer (C1=1,C2=1,C3=0 on group 3) freezes it: bytes 7F 87 08? build programmatically instead
         assertNotNull(Classic.validateTrailerForWrite(trailerWith(listOf(0, 0, 0, 0b110))))
+        assertNotNull(Classic.validateTrailerForWrite(trailerWith(listOf(0, 0, 0, 0b000))))
+        assertNotNull(Classic.validateTrailerForWrite(Hex.decode("000000000000" + "FF078069" + "FFFFFFFFFFFF")))
         assertNotNull(Classic.validateTrailerForWrite(trailerWith(listOf(0b111, 0, 0, 1))))
         assertNull(Classic.validateTrailerForWrite(trailerWith(listOf(0b100, 0b100, 0b100, 0b011))))
         assertEquals(listOf(0b100, 0b110, 0b001, 0b011), Classic.accessBits(trailerWith(listOf(0b100, 0b110, 0b001, 0b011))))
@@ -161,6 +171,8 @@ class CoreTest {
         assertEquals(0x25, Type2.specFromVersion(Hex.decode("0004030101000E03"))!!.configPage)
         assertNull(Type2.specFromVersion(Hex.decode("0005040201000F03")))
         assertNull(Type2.specFromVersion(null))
+        assertNull(Type2.specFromVersion(Hex.decode("0004040502001303")), "NTAG I2C must not be taken for NTAG216")
+        assertNull(Type2.specFromVersion(Hex.decode("0004040102000B03")), "NTAG210u has no configuration pages")
         for (s in listOf("0004040201000F03", "0004040201001103", "0004040201001303", "0004040101000B03", "0004040101000E03")) {
             val spec = Type2.specFromVersion(Hex.decode(s))!!
             assertEquals(spec.totalPages - 4, spec.configPage)
@@ -252,6 +264,9 @@ class CoreTest {
         assertFalse(Originality.verify(pub, uid, sig))
         assertFalse(Originality.verify(pub, uid, ByteArray(32)))
         assertNull(Originality.verifiedFamily(uid, ByteArray(32) { 0x11 }))
+        // only 7-byte NXP UIDs are eligible; a zero or foreign UID must never verify
+        assertNull(Originality.verifiedFamily(ByteArray(7), sig))
+        assertNull(Originality.verifiedFamily(Hex.decode("A1B2C3D4"), sig))
     }
 
     // ---- vault crypto ----
@@ -319,6 +334,6 @@ class CoreTest {
         assertEquals(v, VaultData.decode(VaultData.encode(v)))
         assertEquals("NXP Semiconductors", TagIdentity.manufacturer(Hex.decode("04A1B2C3D4E5F6"), false))
         assertEquals("STMicroelectronics", TagIdentity.manufacturer(Hex.decode("0102030405" + "0002E0").let { Hex.decode("1122334455" + "6602E0") }, true))
-        assertEquals("MIFARE DESFire", TagIdentity.typeFromSak(0x20, Hex.decode("4403")))
+        assertEquals("MIFARE DESFire / NTAG 4xx / Plus", TagIdentity.typeFromSak(0x20, Hex.decode("4403")))
     }
 }

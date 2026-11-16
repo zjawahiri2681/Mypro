@@ -91,7 +91,7 @@ object TagIdentity {
         0x19 -> "MIFARE Classic 2K"
         0x10 -> "MIFARE Plus 2K (SL2)"
         0x11 -> "MIFARE Plus 4K (SL2)"
-        0x20 -> if (atqa != null && atqa.size == 2 && atqa[0].toInt() == 0x44 && atqa[1].toInt() == 0x03) "MIFARE DESFire" else "ISO 14443-4 smart card"
+        0x20 -> if (atqa != null && atqa.size == 2 && atqa[0].toInt() == 0x44 && atqa[1].toInt() == 0x03) "MIFARE DESFire / NTAG 4xx / Plus" else "ISO 14443-4 smart card"
         0x28 -> "Smart card with MIFARE Classic 1K emulation"
         0x38 -> "Smart card with MIFARE Classic 4K emulation"
         0x88 -> "MIFARE Classic 1K (Infineon)"

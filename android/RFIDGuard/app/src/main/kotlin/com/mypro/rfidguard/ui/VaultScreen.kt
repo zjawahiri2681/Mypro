@@ -41,7 +41,6 @@ import com.mypro.rfidguard.core.vault.ExportCodec
 @Composable
 fun VaultScreen(model: AppModel, host: Host) {
     val vault = model.data ?: return
-    var addKey by remember { mutableStateOf(false) }
     var showLog by remember { mutableStateOf(false) }
     var keyToDelete by remember { mutableStateOf<ClassicKeyEntry?>(null) }
 
@@ -58,17 +57,16 @@ fun VaultScreen(model: AppModel, host: Host) {
         }
 
         SectionCard("MIFARE Classic keys (${vault.classicKeys.size})") {
-            Hint("Keys for your own cards. The three public factory keys are always tried; add others here. RFID Guard does not crack or guess keys.")
+            Hint("Keys for your own cards. Each key is only ever presented to the card it was added for, so a fake card cannot collect your keys. To add one, scan the card and choose \"Add key\". RFID Guard does not crack or guess keys.")
             for (k in vault.classicKeys) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(k.label)
-                        Hint("•••• •••• ••" + k.keyHex.takeLast(2))
+                        Hint("Card " + (if (k.uidHex.isEmpty()) "unassigned (not used)" else formatUid(k.uidHex)) + " · key ends " + k.keyHex.takeLast(2))
                     }
                     TextButton(onClick = { keyToDelete = k }) { Text("Remove") }
                 }
             }
-            OutlinedButton(onClick = { addKey = true }, enabled = vault.classicKeys.size < 32) { Text("Add key") }
         }
 
         SectionCard("Tag passwords (${vault.tagPasswords.size})") {
@@ -105,24 +103,17 @@ fun VaultScreen(model: AppModel, host: Host) {
         Spacer(Modifier.height(12.dp))
     }
 
-    if (addKey) AddKeyDialog(
-        onConfirm = { label, key ->
-            addKey = false
-            model.update { v -> if (v.classicKeys.any { it.keyHex == key }) v else v.copy(classicKeys = v.classicKeys + ClassicKeyEntry(label, key)) }
-        },
-        onDismiss = { addKey = false },
-    )
     keyToDelete?.let { k ->
         ConfirmDialog(
             "Remove this key?", "\"${k.label}\" is deleted from the vault. Cards that need it can no longer be read here.", "Remove", danger = true,
-            onConfirm = { keyToDelete = null; model.update { v -> v.copy(classicKeys = v.classicKeys.filterNot { it.keyHex == k.keyHex }) } },
+            onConfirm = { keyToDelete = null; model.update { v -> v.copy(classicKeys = v.classicKeys.filterNot { it.keyHex == k.keyHex && it.uidHex == k.uidHex }) } },
             onDismiss = { keyToDelete = null },
         )
     }
 }
 
 @Composable
-private fun AddKeyDialog(onConfirm: (String, String) -> Unit, onDismiss: () -> Unit) {
+fun AddKeyDialog(onConfirm: (String, String) -> Unit, onDismiss: () -> Unit) {
     var label by remember { mutableStateOf("") }
     var keyText by remember { mutableStateOf("") }
     val key = Hex.decodeOrNull(keyText)?.takeIf { it.size == 6 }

@@ -66,5 +66,5 @@ object Originality {
 
     /** Name of the NXP key that validates [signature] for [uid], or null when none does. */
     fun verifiedFamily(uid: ByteArray, signature: ByteArray): String? =
-        NXP_PUBLIC_KEYS.entries.firstOrNull { verify(it.value, uid, signature) }?.key
+        if (uid.size != 7 || uid[0].toInt() != 0x04) null else NXP_PUBLIC_KEYS.entries.firstOrNull { verify(it.value, uid, signature) }?.key
 }

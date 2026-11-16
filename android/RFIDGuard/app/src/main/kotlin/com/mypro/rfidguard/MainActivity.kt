@@ -136,8 +136,9 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
                 model.busy = false
                 val v = imported
                 if (error != null || v == null) { model.message = error ?: "The backup could not be read."; return@runOnUiThread }
-                val current = model.data?.settings
-                if (model.update { _ -> if (current != null) v.copy(settings = current) else v }) {
+                // Settings stay as they are, and tag passwords set since the backup was made are kept:
+                // losing one would leave that tag locked for good.
+                if (model.update { now -> v.copy(settings = now.settings, tagPasswords = v.tagPasswords + now.tagPasswords, audit = now.audit) }) {
                     model.lastScan = null
                     model.viewing = null
                     model.message = "Backup restored: ${v.savedTags.size} saved tags, ${v.classicKeys.size} keys, ${v.tagPasswords.size} tag passwords."
@@ -229,6 +230,8 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
         val complete: () -> Unit = {
             try {
                 model.onUnlocked(if (creating) vault.finishCreate(pending) else vault.finishUnlock(pending))
+                // A vault made before the phone had a screen lock is bound to it as soon as one exists.
+                if (!vault.authBound && vault.deviceSecure()) upgradeProtection()
             } catch (e: Exception) {
                 if (creating) vault.discard(pending)
                 model.vaultBroken = !creating
@@ -299,7 +302,7 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
 
     override fun openLink(uri: String) {
         try {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addCategory(Intent.CATEGORY_BROWSABLE))
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri.trim()).normalizeScheme()).addCategory(Intent.CATEGORY_BROWSABLE))
         } catch (e: Exception) {
             model.message = "No app on this phone can open that link."
         }
@@ -317,7 +320,8 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
         clipboard.setPrimaryClip(clip)
         handler.postDelayed({
             runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) clipboard.clearPrimaryClip()
+                // Only clear what this app put there; the owner may have copied something else since.
+                if (clipboard.primaryClipDescription?.label?.toString() == label) clipboard.clearPrimaryClip()
             }
         }, CLIPBOARD_CLEAR_MS)
         model.message = "Copied. The clipboard is cleared again in ${CLIPBOARD_CLEAR_MS / 1000} seconds."

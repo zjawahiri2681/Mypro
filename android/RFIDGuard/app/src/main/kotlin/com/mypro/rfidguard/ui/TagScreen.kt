@@ -50,6 +50,7 @@ import com.mypro.rfidguard.core.security.Severity
 import com.mypro.rfidguard.core.security.TagAudit
 import com.mypro.rfidguard.core.toHex
 import com.mypro.rfidguard.core.type2.Type2
+import com.mypro.rfidguard.core.vault.ClassicKeyEntry
 import com.mypro.rfidguard.core.vault.SavedTag
 import com.mypro.rfidguard.core.vault.TagPassword
 import com.mypro.rfidguard.nfc.WriteOp
@@ -77,7 +78,7 @@ fun ScanScreen(model: AppModel, host: Host) {
     }
 }
 
-private enum class TagDialog { NONE, SAVE, ERASE, LOCK, SET_PASSWORD, REMOVE_PASSWORD, RESTORE, CLASSIC_WRITE, DELETE }
+private enum class TagDialog { NONE, SAVE, ERASE, LOCK, SET_PASSWORD, REMOVE_PASSWORD, RESTORE, CLASSIC_WRITE, ADD_KEY, DELETE }
 
 /** Full view of one tag: verdict, content, actions and raw memory. [saved] is set when it comes from the vault. */
 @Composable
@@ -173,6 +174,7 @@ fun TagDetail(model: AppModel, host: Host, tag: TagSnapshot, saved: SavedTag?) {
                     }
                     if (tag.ndef?.writable == true && tag.ndef?.canMakeReadOnly == true) OutlinedButton(onClick = { dialog = TagDialog.LOCK }) { Text("Lock forever", color = MaterialTheme.colorScheme.error) }
                     if (tag.classic != null) OutlinedButton(onClick = { dialog = TagDialog.CLASSIC_WRITE }) { Text("Write block") }
+                    if (tag.classic != null || tag.sak == 0x08 || tag.sak == 0x18) OutlinedButton(onClick = { dialog = TagDialog.ADD_KEY }) { Text("Add key") }
                 }
             }
             if (storedPassword != null) {
@@ -202,7 +204,7 @@ fun TagDetail(model: AppModel, host: Host, tag: TagSnapshot, saved: SavedTag?) {
         Spacer(Modifier.height(12.dp))
     }
 
-    linkToOpen?.let { link -> LinkDialog(link, onOpen = { linkToOpen = null; host.openLink(link) }, onDismiss = { linkToOpen = null }) }
+    linkToOpen?.takeIf { it.isNotBlank() }?.let { link -> LinkDialog(link, onOpen = { linkToOpen = null; host.openLink(link) }, onDismiss = { linkToOpen = null }) }
 
     when (dialog) {
         TagDialog.NONE -> {}
@@ -223,7 +225,7 @@ fun TagDetail(model: AppModel, host: Host, tag: TagSnapshot, saved: SavedTag?) {
         )
         TagDialog.ERASE -> ConfirmDialog(
             "Erase this tag?", "The content of tag ${formatUid(tag.uidHex)} is replaced by an empty message. Save it to the vault first if you may need it again.", "Erase", danger = true,
-            onConfirm = { dialog = TagDialog.NONE; model.arm(WriteOp.Erase(tag.uidHex)) },
+            onConfirm = { dialog = TagDialog.NONE; host.confirmIdentity("Erase a tag") { model.arm(WriteOp.Erase(tag.uidHex)) } },
             onDismiss = { dialog = TagDialog.NONE },
         )
         TagDialog.LOCK -> ConfirmDialog(
@@ -250,6 +252,17 @@ fun TagDetail(model: AppModel, host: Host, tag: TagSnapshot, saved: SavedTag?) {
         TagDialog.RESTORE -> RestoreDialog(
             tag = tag, expert = vault.settings.expertMode,
             onConfirm = { anyTag -> dialog = TagDialog.NONE; host.confirmIdentity("Restore a saved copy to a tag") { model.arm(WriteOp.Restore(if (anyTag) null else tag.uidHex, tag)) } },
+            onDismiss = { dialog = TagDialog.NONE },
+        )
+        TagDialog.ADD_KEY -> AddKeyDialog(
+            onConfirm = { label, key ->
+                dialog = TagDialog.NONE
+                val added = model.update { v ->
+                    if (v.classicKeys.count { it.uidHex == tag.uidHex } >= 16 || v.classicKeys.any { it.keyHex == key && it.uidHex == tag.uidHex }) v
+                    else v.copy(classicKeys = v.classicKeys + ClassicKeyEntry(label, key, tag.uidHex))
+                }
+                if (added) model.message = "Key stored for card ${formatUid(tag.uidHex)}. Scan the card again to read with it."
+            },
             onDismiss = { dialog = TagDialog.NONE },
         )
         TagDialog.CLASSIC_WRITE -> ClassicWriteDialog(
@@ -312,7 +325,7 @@ private fun SetPasswordDialog(onConfirm: (Boolean) -> Unit, onDismiss: () -> Uni
                     Text("Also hide the content from other readers")
                 }
                 Hint(if (protectRead) "Other phones will see an empty or unreadable tag. Choose this for private data, not for tags others should tap." else "Everyone can still read the tag; nobody else can change it.")
-                Hint("Limits: the chip's password is 32 bits and is sent unencrypted, and the lock bits stay outside the protected area. This stops casual tampering, not a prepared attacker. If the vault is lost without a backup, the tag stays protected forever.")
+                Hint("Limits: the chip's password is 32 bits and is sent unencrypted. This stops casual tampering, not a prepared attacker. If the vault is lost without a backup, the tag stays protected forever.")
             }
         },
         confirmButton = { Button(onClick = { onConfirm(protectRead) }) { Text("Continue") } },

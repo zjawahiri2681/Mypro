@@ -15,8 +15,9 @@ import javax.crypto.spec.SecretKeySpec
 @Serializable
 data class SavedTag(val id: String, val name: String, val savedAtEpochMs: Long, val snapshot: TagSnapshot)
 
+/** A MIFARE Classic key. It is only ever presented to the card whose UID it was added for. */
 @Serializable
-data class ClassicKeyEntry(val label: String, val keyHex: String)
+data class ClassicKeyEntry(val label: String, val keyHex: String, val uidHex: String = "")
 
 /** Password and acknowledge bytes set on an NTAG / Ultralight EV1 by this app. */
 @Serializable

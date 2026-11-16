@@ -18,7 +18,7 @@ object UriRisk {
         "market" to "Opens an app store page", "wifi" to "Configures a Wi-Fi network",
     )
     private val DANGEROUS_SCHEMES = setOf("javascript", "data", "file", "content", "intent", "vbscript", "blob", "jar", "about")
-    private val BIDI_OR_INVISIBLE = Regex("[\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u2069\\uFEFF]")
+    private val BIDI_OR_INVISIBLE = Regex("[\\u00AD\\u061C\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2069\\uFEFF]")
 
     fun assess(uri: String): List<Finding> {
         val out = ArrayList<Finding>()

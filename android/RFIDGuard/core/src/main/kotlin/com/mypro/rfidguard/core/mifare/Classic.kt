@@ -63,7 +63,9 @@ object Classic {
     fun validateTrailerForWrite(trailer: ByteArray): String? {
         if (trailer.size != 16) return "A sector trailer is exactly 16 bytes"
         val bits = accessBits(trailer) ?: return "Access bits fail their redundancy check; writing this would lock the sector permanently"
+        if (trailer.copyOfRange(0, 6).all { it.toInt() == 0 }) return "Key A is all zeros. A trailer read from a card shows key A as zeros - enter the real key A"
         if (trailerIsPermanent(bits[3])) return "These access bits freeze the sector trailer forever"
+        if (bits[3] == 0b000 || bits[3] == 0b100) return "These access bits can never be changed again once written"
         if (bits.take(3).any { it == 0b111 }) return "These access bits make a data block permanently inaccessible"
         return null
     }

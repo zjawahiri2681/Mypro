@@ -133,7 +133,7 @@ object TagReader {
             val signature = if (spec?.hasOriginalitySignature == true) link.signature() else null
             var authenticated = false
             if (password != null && spec?.configPage != null) {
-                authenticated = link.authenticate(password)
+                authenticated = link.unlockIfProtected(spec, password) == Type2Link.Access.AUTHENTICATED
                 if (authenticated && !link.packMatched) notes += "The tag accepted the stored password but answered with an unexpected acknowledge code."
             }
 
@@ -215,7 +215,8 @@ object TagReader {
 
                 val keyA = keys.firstOrNull { auth(it, false) }
                 if (keyA != null) readAll()
-                val keyB = keys.firstOrNull { auth(it, true) }
+                // Key B is only searched for when key A left something unread: each wrong key costs time.
+                val keyB = if (keyA != null && blocks.none { it == null }) null else keys.firstOrNull { auth(it, true) }
                 if (keyB != null && blocks.any { it == null }) readAll()
                 if (keyA != null && blocks.any { it == null }) {
                     // one unreadable block aborts the pass; give the remaining blocks one more try per key
@@ -236,19 +237,20 @@ object TagReader {
         if (uid.size != 8) return null
         v.connect()
         try {
-            fun cmd(code: Int, vararg params: Int): ByteArray? = try {
+            fun cmd(code: Int, vararg params: Int, optional: Boolean = false): ByteArray? = try {
                 // addressed mode, high data rate
                 val frame = byteArrayOf(0x22, code.toByte()) + uid + ByteArray(params.size) { params[it].toByte() }
                 v.transceive(frame).takeIf { it.isNotEmpty() && it[0].toInt() and 0x01 == 0 }
             } catch (e: android.nfc.TagLostException) {
-                throw e
+                // Tags that do not implement an optional command stay silent, which Android reports as "lost".
+                if (optional) null else throw e
             } catch (e: IOException) {
                 null
             }
 
             var dsfid: Int? = null; var afi: Int? = null; var icRef: Int? = null
             var blockCount = 0; var blockSize = 0
-            cmd(0x2B)?.let { info ->
+            cmd(0x2B, optional = true)?.let { info ->
                 if (info.size >= 10) {
                     val flags = info[1].toInt() and 0xFF
                     var pos = 10

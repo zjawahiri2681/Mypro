@@ -7,8 +7,9 @@ on:
       - ".github/workflows/rfidguard-build.yml"
   workflow_dispatch:
 
+# Read-only by default; only the manual release job below may write.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: rfidguard-${{ github.ref }}
@@ -16,8 +17,10 @@ concurrency:
 
 jobs:
   build:
-    name: Test, build and publish APK
+    name: Test and build APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: ${{ github.event_name == 'workflow_dispatch' && 'write' || 'read' }}
     defaults:
       run:
         working-directory: android/RFIDGuard
@@ -35,13 +38,11 @@ jobs:
         id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.RFIDGUARD_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.RFIDGUARD_KEYSTORE_PASSWORD }}
         run: |
           set -e
           mkdir -p "$RUNNER_TEMP/keys"
           if [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/keys/release.jks"
-            echo "RFIDGUARD_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
             echo "stable=true" >> "$GITHUB_OUTPUT"
             echo "Using the signing key from repository secrets."
           else
@@ -52,7 +53,7 @@ jobs:
             keytool -genkeypair -keystore "$RUNNER_TEMP/keys/release.jks" -storepass "$PASS" -keypass "$PASS" \
               -alias rfidguard -keyalg RSA -keysize 3072 -validity 10000 \
               -dname "CN=RFID Guard, OU=Personal, O=Mypro, C=SA" >/dev/null 2>&1
-            echo "RFIDGUARD_KEYSTORE_PASSWORD=$PASS" >> "$GITHUB_ENV"
+            (umask 077 && printf '%s' "$PASS" > "$RUNNER_TEMP/keys/one-off-pass")
             echo "stable=false" >> "$GITHUB_OUTPUT"
             echo "::warning::No RFIDGUARD_KEYSTORE_BASE64 secret: this build is signed with a one-off key. It installs, but a later build cannot be installed over it without uninstalling (which erases the vault). See android/RFIDGuard/README.md, 'Signing'."
           fi
@@ -63,8 +64,20 @@ jobs:
       - name: Unit tests (core)
         run: ./gradlew :core:test --no-daemon --stacktrace
 
+      # The keystore password is given to this step only, never to the job environment, and the
+      # key material is removed from the runner before any later step runs.
       - name: Build release APK
-        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+        env:
+          KEYSTORE_PASSWORD_SECRET: ${{ secrets.RFIDGUARD_KEYSTORE_PASSWORD }}
+        run: |
+          set -e
+          if [ -f "$RUNNER_TEMP/keys/one-off-pass" ]; then
+            export RFIDGUARD_KEYSTORE_PASSWORD="$(cat "$RUNNER_TEMP/keys/one-off-pass")"
+          else
+            export RFIDGUARD_KEYSTORE_PASSWORD="$KEYSTORE_PASSWORD_SECRET"
+          fi
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          rm -rf "$RUNNER_TEMP/keys"
 
       - name: Collect artifacts
         id: collect
@@ -98,7 +111,7 @@ jobs:
 
       # This repository is public, so a release is a public download. It is only published when the
       # workflow is started by hand (Actions -> Build RFID Guard APK -> Run workflow). Pushes build
-      # and test, and leave the APK as a workflow artifact.
+      # and test, and leave the APK as a workflow artifact (downloadable by signed-in GitHub users).
       - name: Publish GitHub release with the APK
         if: github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2

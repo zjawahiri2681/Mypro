@@ -96,7 +96,10 @@ class AppModel(app: Application) : AndroidViewModel(app) {
         main.post { busy = true }
         try {
             val op = pendingOp
-            val keys = d.classicKeys.mapNotNull { Hex.decodeOrNull(it.keyHex) }
+            // Keys are offered only to the card they belong to: a fake card presented by someone else
+            // could otherwise harvest every stored key from the authentication attempts.
+            val uidHex = (tag.id ?: ByteArray(0)).toHex()
+            val keys = d.classicKeys.filter { it.uidHex == uidHex }.mapNotNull { Hex.decodeOrNull(it.keyHex) }
             if (op != null && SystemClock.elapsedRealtime() - armedAt > ARM_TIMEOUT_MS) {
                 main.post { pendingOp = null; message = "The write request expired before a tag was presented. Nothing was written." }
                 return
@@ -107,7 +110,6 @@ class AppModel(app: Application) : AndroidViewModel(app) {
                     if (data != null) { lastScan = snap; viewing = null; tab = Tab.SCAN }
                 }
             } else {
-                val uidHex = (tag.id ?: ByteArray(0)).toHex()
                 val result = TagWriter.execute(tag, op, d)
                 val snap = if (result.wrongTag) null else runCatching { TagReader.read(tag, keys, d.tagPasswords) }.getOrNull()
                 main.post {

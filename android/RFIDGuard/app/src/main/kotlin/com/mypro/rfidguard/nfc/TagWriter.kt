@@ -46,14 +46,14 @@ object TagWriter {
             when (op) {
                 is WriteOp.WriteNdef -> {
                     val records = if (op.sign) TagSigner.sign(Hex.decode(vault.signingKeyHex), uid, op.records) else op.records
-                    val size = writeNdef(tag, NdefCodec.encode(records), vault.tagPasswords[uidHex])
-                    WriteResult(true, "Written and verified: $size bytes" + if (op.sign) ", with authenticity seal." else ".")
+                    val w = writeNdef(tag, NdefCodec.encode(records), vault.tagPasswords[uidHex])
+                    WriteResult(true, (if (w.verified) "Written and verified: " else "Tag formatted and written (scan it to check): ") + "${w.bytes} bytes" + if (op.sign) ", with authenticity seal." else ".")
                 }
                 is WriteOp.Erase -> {
                     writeNdef(tag, NdefCodec.encode(emptyList()), vault.tagPasswords[uidHex])
                     WriteResult(true, "Content erased. The tag now holds an empty message.")
                 }
-                is WriteOp.MakeReadOnly -> makeReadOnly(tag)
+                is WriteOp.MakeReadOnly -> makeReadOnly(tag, vault.tagPasswords[uidHex] != null)
                 is WriteOp.SetPassword -> setPassword(tag, op)
                 is WriteOp.RemovePassword -> removePassword(tag, op, uidHex)
                 is WriteOp.ClassicWrite -> classicWrite(tag, op)
@@ -74,21 +74,27 @@ object TagWriter {
 
     // ---- NDEF ---------------------------------------------------------------------------
 
-    private fun writeNdef(tag: Tag, message: ByteArray, password: TagPassword?): Int {
+    private class Written(val bytes: Int, val verified: Boolean)
+
+    private fun writeNdef(tag: Tag, message: ByteArray, password: TagPassword?): Written {
         if (password != null) {
             val nfcA = NfcA.get(tag)
-            if (nfcA != null) writeNdefAuthenticated(nfcA, message, password)?.let { return it }
+            if (nfcA != null) writeNdefAuthenticated(nfcA, message, password)?.let { return Written(it, true) }
         }
         val ndef = Ndef.get(tag)
         if (ndef != null) {
             ndef.connect()
             try {
                 if (!ndef.isWritable) throw Refused("This tag is read-only.")
-                if (message.size > ndef.maxSize) throw Refused("Content needs ${message.size} bytes but the tag holds ${ndef.maxSize}.")
-                ndef.writeNdefMessage(NdefMessage(message))
+                // Android may re-serialise a message (an empty record gains an id-length byte), so
+                // sizes and the read-back comparison use Android's own encoding.
+                val ndefMessage = NdefMessage(message)
+                val wire = ndefMessage.toByteArray()
+                if (wire.size > ndef.maxSize) throw Refused("Content needs ${wire.size} bytes but the tag holds ${ndef.maxSize}.")
+                ndef.writeNdefMessage(ndefMessage)
                 val back = ndef.ndefMessage?.toByteArray()
-                if (back == null || !back.contentEquals(message)) throw Refused("The tag did not keep the data (verification failed). It may be protected or worn out.")
-                return message.size
+                if (back == null || !back.contentEquals(wire)) throw Refused("The tag did not keep the data (verification failed). It may be protected or worn out.")
+                return Written(wire.size, true)
             } finally {
                 try { ndef.close() } catch (_: IOException) {}
             }
@@ -100,7 +106,7 @@ object TagWriter {
         } finally {
             try { formatable.close() } catch (_: IOException) {}
         }
-        return message.size
+        return Written(message.size, false)
     }
 
     /** NDEF write through raw page commands after PWD_AUTH. Returns null when the password was not accepted. */
@@ -109,7 +115,8 @@ object TagWriter {
         link.open()
         try {
             val spec = Type2.specFromVersion(link.version()) ?: return null
-            if (!link.authenticate(password)) return null
+            // An open tag is written through the normal path; the password is only sent when needed.
+            if (link.unlockIfProtected(spec, password) != Type2Link.Access.AUTHENTICATED) return null
             val cc = link.fastRead(3, 3) ?: return null
             if (cc[0].toInt() and 0xFF != 0xE1) throw Refused("The tag is not NDEF formatted.")
             if (Type2.ccReadOnly(cc)) throw Refused("This tag is read-only.")
@@ -118,7 +125,21 @@ object TagWriter {
             val area = link.fastReadRange(Type2.FIRST_USER_PAGE, lastPage) ?: throw Refused("The tag memory could not be read.")
             val updated = Type2.buildNdefArea(area, message, capacity)
                 ?: throw Refused("Content needs ${message.size} bytes but the tag holds about ${capacity - 3}.")
-            writePages(link, Type2.FIRST_USER_PAGE, area, updated)
+            // Tear-safe order: set the NDEF length to zero, write the body, write the real length last.
+            // An interrupted write then leaves an empty tag rather than a length pointing at mixed data.
+            val lengthIndex = (Type2.findNdefTlv(area)?.tlvOffset ?: 0) + 1
+            val lengthPage = lengthIndex / 4
+            val blank = area.copyOfRange(lengthPage * 4, lengthPage * 4 + 4)
+            val finalLengthPage = updated.copyOfRange(lengthPage * 4, lengthPage * 4 + 4)
+            if (lengthIndex - 1 >= lengthPage * 4) blank[(lengthIndex - 1) % 4] = 0x03
+            blank[lengthIndex % 4] = 0
+            if (!link.write(Type2.FIRST_USER_PAGE + lengthPage, blank)) throw Refused("The tag refused the write. Nothing was changed.")
+            val body = updated.copyOf()
+            blank.copyInto(body, lengthPage * 4)
+            val now = area.copyOf()
+            blank.copyInto(now, lengthPage * 4)
+            writePages(link, Type2.FIRST_USER_PAGE, now, body)
+            if (!link.write(Type2.FIRST_USER_PAGE + lengthPage, finalLengthPage)) throw Refused("The tag refused the final write. It now reads as empty; write the content again.")
             val back = link.fastReadRange(Type2.FIRST_USER_PAGE, Type2.FIRST_USER_PAGE + updated.size / 4 - 1)
             if (back == null || !back.contentEquals(updated)) throw Refused("The tag did not keep the data (verification failed).")
             return message.size
@@ -139,7 +160,20 @@ object TagWriter {
         return written
     }
 
-    private fun makeReadOnly(tag: Tag): WriteResult {
+    private fun makeReadOnly(tag: Tag, hasStoredPassword: Boolean): WriteResult {
+        // Locking a password-protected chip without authenticating can set the one-time read-only
+        // bits and then fail half-way, so it is refused before anything is sent.
+        if (hasStoredPassword) throw Refused("This tag has a password in your vault. Remove the password first, then lock it.")
+        NfcA.get(tag)?.takeIf { it.sak.toInt() == 0 }?.let { nfcA ->
+            val link = Type2Link(nfcA)
+            link.open()
+            try {
+                val spec = Type2.specFromVersion(link.version())
+                if (spec != null && link.unlockIfProtected(spec, null) != Type2Link.Access.OPEN) throw Refused("This tag is password-protected by another app or vault. It cannot be locked from here.")
+            } finally {
+                link.close()
+            }
+        }
         val ndef = Ndef.get(tag) ?: throw Refused("Only NDEF tags can be locked.")
         ndef.connect()
         try {
@@ -160,7 +194,7 @@ object TagWriter {
         val spec = Type2.specFromVersion(link.version())
             ?: throw Refused("This chip has no password feature. NTAG210/212/213/215/216 and MIFARE Ultralight EV1 do.")
         val page = spec.configPage ?: throw Refused("This chip has no password feature.")
-        if (password != null) link.authenticate(password)
+        if (link.unlockIfProtected(spec, password) == Type2Link.Access.DENIED) throw Refused("The tag is protected by a password that is not in this vault.")
         val cfg = link.fastRead(page, page + 1)
             ?: throw Refused("The tag is protected by a password that is not in this vault.")
         return Config(spec, page, cfg.copyOfRange(0, 4), cfg.copyOfRange(4, 8))
@@ -183,14 +217,17 @@ object TagWriter {
             if (!link.write(c.page + 3, byteArrayOf(pack[0], pack[1], 0, 0))) throw Refused("The tag refused the acknowledge code. Protection is not active.")
             val access = (c.cfg1[0].toInt() and 0x7F) or (if (op.protectRead) 0x80 else 0x00)
             if (!link.write(c.page + 1, byteArrayOf(access.toByte(), c.cfg1[1], c.cfg1[2], c.cfg1[3]))) throw Refused("The tag refused the access setting. Protection is not active.")
-            if (!link.write(c.page, byteArrayOf(c.cfg0[0], c.cfg0[1], c.cfg0[2], Type2.FIRST_USER_PAGE.toByte()))) throw Refused("The tag refused the final step. Protection is not active.")
+            // Write-only protection starts at page 0 so the lock bits and capability container are covered
+            // too. Hiding the content starts at page 4, which keeps the tag identifiable to readers.
+            val auth0 = if (op.protectRead) Type2.FIRST_USER_PAGE else 0
+            if (!link.write(c.page, byteArrayOf(c.cfg0[0], c.cfg0[1], c.cfg0[2], auth0.toByte()))) throw Refused("The tag refused the final step. Protection is not active.")
             // Fresh session: the password must now be accepted and the configuration must read back.
             link.close(); link.open()
             if (!link.authenticate(op.password)) throw Refused("The tag did not accept the new password on verification. Scan the tag to see its state.")
             val check = link.fastRead(c.page, c.page + 1)?.let { Type2.config(it.copyOfRange(0, 4), it.copyOfRange(4, 8)) }
-            if (check == null || check.auth0 != Type2.FIRST_USER_PAGE || check.readProtected != op.protectRead) throw Refused("Verification of the protection settings failed. Scan the tag to see its state.")
+            if (check == null || check.auth0 != auth0 || check.readProtected != op.protectRead) throw Refused("Verification of the protection settings failed. Scan the tag to see its state.")
             val scope = if (op.protectRead) "Reading and writing" else "Writing"
-            return WriteResult(true, "$scope the user memory now needs the password, which is stored in your vault. Export a backup so it cannot be lost.")
+            return WriteResult(true, "$scope this tag now needs the password, which is stored in your vault. Export a backup so it cannot be lost.")
         } finally {
             link.close()
         }
@@ -203,19 +240,19 @@ object TagWriter {
         try {
             val spec = Type2.specFromVersion(link.version()) ?: throw Refused("This chip has no password feature.")
             val page = spec.configPage ?: throw Refused("This chip has no password feature.")
-            val authed = link.authenticate(op.password)
-            val cfg = link.fastRead(page, page + 1)
-            if (cfg == null) throw Refused("The tag did not accept the stored password.")
+            if (link.unlockIfProtected(spec, op.password) == Type2Link.Access.DENIED) throw Refused("The tag did not accept the stored password.")
+            val cfg = link.fastRead(page, page + 1) ?: throw Refused("The tag configuration could not be read.")
             val current = Type2.config(cfg.copyOfRange(0, 4), cfg.copyOfRange(4, 8))!!
-            if (!authed && current.protectionActive(spec.totalPages)) throw Refused("The tag did not accept the stored password.")
             if (current.configLocked) throw Refused("The configuration of this tag is permanently locked.")
             if (!link.write(page, byteArrayOf(cfg[0], cfg[1], cfg[2], 0xFF.toByte()))) throw Refused("The tag refused the change. The password is still active.")
-            link.write(page + 1, byteArrayOf((cfg[4].toInt() and 0x7F).toByte(), cfg[5], cfg[6], cfg[7]))
-            link.write(page + 2, ByteArray(4) { 0xFF.toByte() })
-            link.write(page + 3, ByteArray(4))
+            val tidy = link.write(page + 1, byteArrayOf((cfg[4].toInt() and 0x7F).toByte(), cfg[5], cfg[6], cfg[7])) &&
+                link.write(page + 2, ByteArray(4) { 0xFF.toByte() }) &&
+                link.write(page + 3, ByteArray(4))
             val check = link.fastRead(page, page)
             if (check == null || check[3].toInt() and 0xFF != 0xFF) throw Refused("Verification failed. Scan the tag to see its state.")
-            return WriteResult(true, "Password protection removed. The tag is open again.", forgetPasswordFor = uidHex)
+            // The password stays in the vault unless the chip was fully reset to factory values.
+            return if (tidy) WriteResult(true, "Password protection removed. The tag is open again.", forgetPasswordFor = uidHex)
+            else WriteResult(true, "Protection is switched off and the tag is open, but the old password could not be cleared from the chip. It is kept in your vault.")
         } finally {
             link.close()
         }
@@ -263,7 +300,7 @@ object TagWriter {
                 val spec = Type2.specFromVersion(version)
                 val savedSpec = Type2.specFromVersion(dump.versionHex?.let(Hex::decodeOrNull))
                 if (spec == null || savedSpec == null || spec.name != savedSpec.name) throw Refused("The saved copy is from ${savedSpec?.name ?: "an unidentified chip"} and this tag is ${spec?.name ?: "an unidentified chip"}. Restore needs the same chip type.")
-                vault.tagPasswords[uidHex]?.let { link.authenticate(it) }
+                if (link.unlockIfProtected(spec, vault.tagPasswords[uidHex]) == Type2Link.Access.DENIED) throw Refused("The tag is protected by a password that is not in this vault.")
                 val userPages = spec.userBytes / 4
                 val saved = dump.pagesHex.drop(Type2.FIRST_USER_PAGE).take(userPages).map { it?.let(Hex::decodeOrNull) }
                 if (saved.size < userPages || saved.any { it == null || it.size != 4 }) throw Refused("The saved copy is incomplete (some pages were unreadable when it was made).")
@@ -282,7 +319,7 @@ object TagWriter {
             mc.connect()
             try {
                 if (mc.size != dump.sizeBytes) throw Refused("The saved copy is from a ${dump.sizeBytes}-byte card and this card has ${mc.size} bytes.")
-                val vaultKeys = vault.classicKeys.mapNotNull { Hex.decodeOrNull(it.keyHex) } + Classic.WELL_KNOWN_KEYS.map(Hex::decode)
+                val vaultKeys = vault.classicKeys.filter { it.uidHex == uidHex }.mapNotNull { Hex.decodeOrNull(it.keyHex) } + Classic.WELL_KNOWN_KEYS.map(Hex::decode)
                 var written = 0; var skipped = 0
                 for (s in dump.sectors) {
                     val first = mc.sectorToBlock(s.index)
@@ -294,13 +331,21 @@ object TagWriter {
                         val data = s.blocksHex[i]?.let(Hex::decodeOrNull)
                         if (data == null || data.size != 16) { skipped++; continue }
                         var done = false
+                        // Where key B is stored as readable data it cannot write, so key A goes first.
+                        val bFirst = s.blocksHex.lastOrNull()?.let(Hex::decodeOrNull)?.let(Classic::accessBits)?.let { !Classic.keyBReadable(it[3]) } ?: true
+                        val order = if (bFirst) listOf(true to keysB, false to keysA) else listOf(false to keysA, true to keysB)
                         // Authentication is lost after a refused write, so authenticate per attempt.
-                        for ((useB, keys) in listOf(true to keysB, false to keysA)) {
+                        for ((useB, keys) in order) {
                             if (done) break
                             for (k in keys) {
                                 val ok = try { if (useB) mc.authenticateSectorWithKeyB(s.index, k) else mc.authenticateSectorWithKeyA(s.index, k) } catch (e: android.nfc.TagLostException) { throw e } catch (e: IOException) { false }
                                 if (!ok) continue
-                                done = try { mc.writeBlock(block, data); true } catch (e: android.nfc.TagLostException) { throw e } catch (e: IOException) { false }
+                                done = try {
+                                    mc.writeBlock(block, data)
+                                    // read back where the key allows it; an unreadable block is accepted as written
+                                    val back = try { mc.readBlock(block) } catch (e: android.nfc.TagLostException) { throw e } catch (e: IOException) { null }
+                                    back == null || back.contentEquals(data)
+                                } catch (e: android.nfc.TagLostException) { throw e } catch (e: IOException) { false }
                                 break
                             }
                         }
@@ -308,13 +353,13 @@ object TagWriter {
                     }
                 }
                 if (written == 0) throw Refused("No block could be written. The keys of this card are not in the vault.")
-                return WriteResult(skipped == 0, "$written data blocks restored" + (if (skipped > 0) ", $skipped skipped (unreadable in the copy or not writable with known keys)" else "") + ". Block 0 and sector trailers are never copied.")
+                return WriteResult(skipped == 0, "$written data blocks restored and read back" + (if (skipped > 0) ", $skipped skipped (unreadable in the copy or not writable with known keys)" else "") + ". Block 0 and sector trailers are never copied.")
             } finally {
                 try { mc.close() } catch (_: IOException) {}
             }
         }
         val msg = snap.ndef?.messageHex?.let(Hex::decodeOrNull) ?: throw Refused("The saved copy has no content that can be restored.")
-        writeNdef(tag, msg, vault.tagPasswords[uidHex])
-        return WriteResult(true, "Content restored and verified (${msg.size} bytes).")
+        val w = writeNdef(tag, msg, vault.tagPasswords[uidHex])
+        return WriteResult(true, (if (w.verified) "Content restored and verified" else "Tag formatted and content restored") + " (${w.bytes} bytes).")
     }
 }

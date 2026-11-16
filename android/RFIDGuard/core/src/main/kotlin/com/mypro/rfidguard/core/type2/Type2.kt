@@ -29,9 +29,12 @@ object Type2 {
 
     /** Interprets the 8-byte GET_VERSION answer. */
     fun specFromVersion(v: ByteArray?): Type2Spec? {
-        if (v == null || v.size != 8 || v[1].toInt() != 0x04) return null
+        if (v == null || v.size != 8 || v[0].toInt() != 0x00 || v[1].toInt() != 0x04 || v[7].toInt() != 0x03) return null
         val product = v[2].toInt() and 0xFF
         val storage = v[6].toInt() and 0xFF
+        // Sub-type and version separate these chips from look-alikes (NTAG I2C, NTAG210u, Ultralight Nano)
+        // that report the same storage size but have a different memory map.
+        if (v[3].toInt() !in setOf(0x01, 0x02, 0x04) || v[4].toInt() != 0x01) return null
         return when (product) {
             0x04 -> when (storage) {
                 0x0B -> Type2Spec("NTAG210", 20, 48, 16, true)
