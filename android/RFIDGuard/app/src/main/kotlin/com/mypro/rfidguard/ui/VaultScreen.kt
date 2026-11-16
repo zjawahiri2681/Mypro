@@ -144,6 +144,8 @@ private enum class BackupAction { NONE, EXPORT, IMPORT }
 fun SettingsScreen(model: AppModel, host: Host) {
     val vault = model.data ?: return
     val status = host.deviceStatus
+    val authBound = remember(model.vaultRevision) { model.vault.authBound }
+    val strongBox = remember(model.vaultRevision) { model.vault.strongBox }
     var backup by remember { mutableStateOf(BackupAction.NONE) }
     var confirmImport by remember { mutableStateOf(false) }
     var confirmWipe by remember { mutableStateOf(false) }
@@ -151,11 +153,11 @@ fun SettingsScreen(model: AppModel, host: Host) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(vertical = 8.dp)) {
         SectionCard("Protection status") {
-            StatusRow(model.vault.authBound, "Vault key needs your biometrics or screen lock",
-                if (model.vault.authBound) "Every unlock is authorised by the phone's secure hardware." else "The vault is encrypted, but the key is not tied to a screen lock.")
-            if (!model.vault.authBound) OutlinedButton(onClick = { host.upgradeProtection() }) { Text("Bind vault to screen lock") }
-            StatusRow(model.vault.strongBox, "Key stored in a dedicated security chip (StrongBox)",
-                if (model.vault.strongBox) "The key lives in a separate tamper-resistant chip." else "This phone keeps the key in its trusted execution environment instead, which is still hardware-backed.", optional = true)
+            StatusRow(authBound, "Vault key needs your biometrics or screen lock",
+                if (authBound) "Every unlock is authorised by the phone's secure hardware." else "The vault is encrypted, but the key is not tied to a screen lock.")
+            if (!authBound) OutlinedButton(onClick = { host.upgradeProtection() }) { Text("Bind vault to screen lock") }
+            StatusRow(strongBox, "Key stored in a dedicated security chip (StrongBox)",
+                if (strongBox) "The key lives in a separate tamper-resistant chip." else "This phone keeps the key in its trusted execution environment instead, which is still hardware-backed.", optional = true)
             StatusRow(status.secureLock, "Phone has a screen lock", if (status.secureLock) "Keep it: removing the screen lock destroys the vault key." else "Set a PIN, pattern or password in the phone settings.")
             StatusRow(!status.rootSuspected, "No sign of root access", if (status.rootSuspected) "Root access lets other software read this app's memory while it is unlocked." else "A basic check found nothing; it cannot rule root out.")
             StatusRow(!status.usbDebugging, "USB debugging is off", if (status.usbDebugging) "Turn off USB debugging in developer options when you do not need it." else "Good.")

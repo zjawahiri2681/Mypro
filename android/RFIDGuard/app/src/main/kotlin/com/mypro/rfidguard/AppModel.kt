@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -43,6 +44,9 @@ class AppModel(app: Application) : AndroidViewModel(app) {
     var message by mutableStateOf<String?>(null)
     var lockScreenError by mutableStateOf<String?>(null)
     var vaultBroken by mutableStateOf(false)
+
+    /** Bumped when the vault key protection changes, so screens re-read it. */
+    var vaultRevision by mutableIntStateOf(0)
     val draft = mutableStateListOf<DraftRecord>()
 
     private val main = Handler(Looper.getMainLooper())

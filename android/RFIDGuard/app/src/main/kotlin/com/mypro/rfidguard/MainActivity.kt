@@ -288,8 +288,7 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
             try {
                 vault.finishRewrap(pending)
                 model.message = "The vault key now needs your biometrics or screen lock for every unlock."
-                // nudge recomposition of the settings screen
-                model.update { it }
+                model.vaultRevision++
             } catch (e: Exception) {
                 vault.discard(pending)
                 model.message = "Could not protect the vault (${e.javaClass.simpleName}). Nothing was changed."

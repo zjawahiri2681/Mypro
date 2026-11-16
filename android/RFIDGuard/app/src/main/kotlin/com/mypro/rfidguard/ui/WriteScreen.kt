@@ -88,7 +88,11 @@ fun WriteScreen(model: AppModel, host: Host) {
             val lat = a.trim().toDoubleOrNull()
             val lon = b.trim().toDoubleOrNull()
             if (lat == null || lon == null || lat !in -90.0..90.0 || lon !in -180.0..180.0) null to "Enter latitude and longitude in decimal degrees"
-            else DraftRecord("Location", "$lat, $lon", NdefContents.uri("geo:$lat,$lon")) to null
+            else {
+                // plain decimals: Double.toString() switches to exponent form for tiny values
+                fun plain(v: Double) = java.math.BigDecimal(v).setScale(6, java.math.RoundingMode.HALF_UP).toPlainString()
+                DraftRecord("Location", plain(lat) + ", " + plain(lon), NdefContents.uri("geo:" + plain(lat) + "," + plain(lon))) to null
+            }
         }
         Kind.APP -> {
             val pkg = a.trim()
