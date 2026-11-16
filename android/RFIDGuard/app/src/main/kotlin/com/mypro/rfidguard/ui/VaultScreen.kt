@@ -122,6 +122,7 @@ fun AddKeyDialog(onConfirm: (String, String) -> Unit, onDismiss: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Add a card key") },
         text = {
+                GuardTouches()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(label, { label = it.take(40) }, "Label (for example: Office card)")
                 Field(keyText, { keyText = it.uppercase().take(17) }, "Key: 6 bytes in hex", secret = true,
@@ -268,6 +269,7 @@ private fun PassphraseDialog(export: Boolean, onConfirm: (CharArray) -> Unit, on
         onDismissRequest = onDismiss,
         title = { Text(if (export) "Protect the backup" else "Open a backup") },
         text = {
+                GuardTouches()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Hint(if (export) "Choose a passphrase of several words. It is the only thing protecting the file once it leaves this phone." else "Enter the passphrase the backup was made with, then pick the file.")
                 Field(pass, { pass = it.take(128) }, "Passphrase", secret = true)

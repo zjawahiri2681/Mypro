@@ -75,6 +75,19 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
         override fun onReceive(context: Context?, intent: Intent?) = model.lock()
     }
 
+    private val nfcChanged = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) = refreshNfcState()
+    }
+
+    private fun refreshNfcState() {
+        val adapter = nfc
+        nfcState = when {
+            adapter == null -> NfcState.ABSENT
+            !adapter.isEnabled -> NfcState.OFF
+            else -> NfcState.ON
+        }
+    }
+
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         pickerOpen = false
         val pass = pendingPassphrase
@@ -156,11 +169,13 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) window.setHideOverlayWindows(true)
         nfc = NfcAdapter.getDefaultAdapter(this)
         ContextCompat.registerReceiver(this, screenOff, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
+        ContextCompat.registerReceiver(this, nfcChanged, IntentFilter(NfcAdapter.ACTION_ADAPTER_STATE_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
         setContent { RfidTheme { AppRoot(model, this) } }
     }
 
     override fun onDestroy() {
         unregisterReceiver(screenOff)
+        unregisterReceiver(nfcChanged)
         handler.removeCallbacks(lockRunnable)
         super.onDestroy()
     }
@@ -189,11 +204,7 @@ class MainActivity : ComponentActivity(), NfcAdapter.ReaderCallback, Host {
     override fun onResume() {
         super.onResume()
         val adapter = nfc
-        nfcState = when {
-            adapter == null -> NfcState.ABSENT
-            !adapter.isEnabled -> NfcState.OFF
-            else -> NfcState.ON
-        }
+        refreshNfcState()
         deviceStatus = DeviceStatus.probe(this)
         // Reader mode keeps every tag inside this app while it is in front: no other app is launched,
         // and nothing is dispatched to this app while it is closed.

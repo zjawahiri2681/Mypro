@@ -146,6 +146,7 @@ private fun MainScreen(model: AppModel, host: Host) {
             onDismissRequest = {},
             title = { Text(op.title) },
             text = {
+                GuardTouches()
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                     CircularProgressIndicator()
                     Spacer(Modifier.height(14.dp))
@@ -164,7 +165,7 @@ private fun MainScreen(model: AppModel, host: Host) {
     model.message?.let { text ->
         AlertDialog(
             onDismissRequest = { model.message = null },
-            text = { Text(text) },
+            text = { GuardTouches(); Text(text) },
             confirmButton = { TextButton(onClick = { model.message = null }) { Text("OK") } },
         )
     }

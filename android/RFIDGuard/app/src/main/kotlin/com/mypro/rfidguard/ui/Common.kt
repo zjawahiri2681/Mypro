@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -60,6 +62,19 @@ private val Colors = darkColorScheme(
     onError = Color(0xFF2A0A0A),
     outline = Color(0xFF3B4C66),
 )
+
+/**
+ * Dialogs live in their own window, which does not inherit the activity's tap-jacking filter.
+ * Called inside each dialog so touches arriving through another app's overlay are dropped there too.
+ */
+@Composable
+fun GuardTouches() {
+    val view = LocalView.current
+    SideEffect {
+        view.filterTouchesWhenObscured = true
+        view.rootView?.filterTouchesWhenObscured = true
+    }
+}
 
 @Composable
 fun RfidTheme(content: @Composable () -> Unit) {
@@ -139,7 +154,7 @@ fun ConfirmDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
-        text = { Text(text) },
+        text = { GuardTouches(); Text(text) },
         confirmButton = {
             Button(
                 onClick = onConfirm,
@@ -195,6 +210,7 @@ fun InputDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
+                GuardTouches()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (hint != null) Hint(hint)
                 Field(value, { value = it }, label, error = if (value.isEmpty()) null else problem)

@@ -294,6 +294,7 @@ private fun LinkDialog(link: String, onOpen: () -> Unit, onDismiss: () -> Unit) 
         onDismissRequest = onDismiss,
         title = { Text("Open this link?") },
         text = {
+                GuardTouches()
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(link, fontFamily = FontFamily.Monospace)
                 if (findings.isEmpty()) Text("No warning signs found. Only open it if you trust where this tag came from.", color = severityColor(Severity.GOOD))
@@ -318,6 +319,7 @@ private fun SetPasswordDialog(onConfirm: (Boolean) -> Unit, onDismiss: () -> Uni
         onDismissRequest = onDismiss,
         title = { Text("Password-protect this tag") },
         text = {
+                GuardTouches()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("RFID Guard creates a random password for this tag and keeps it in your vault. Afterwards only this vault can change the tag.")
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -340,6 +342,7 @@ private fun RestoreDialog(tag: TagSnapshot, expert: Boolean, onConfirm: (Boolean
         onDismissRequest = onDismiss,
         title = { Text("Restore saved copy") },
         text = {
+                GuardTouches()
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("The saved user data is written back to the tag and whatever is there now is overwritten. The identifier, lock bits, keys and password settings are never copied.")
                 if (expert) Row(verticalAlignment = Alignment.CenterVertically) {
@@ -378,6 +381,7 @@ private fun ClassicWriteDialog(tag: TagSnapshot, expert: Boolean, onConfirm: (In
         onDismissRequest = onDismiss,
         title = { Text("Write a block") },
         text = {
+                GuardTouches()
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Field(blockText, { blockText = it.filter(Char::isDigit).take(3) }, "Block number", keyboard = KeyboardType.Number, error = if (blockText.isEmpty()) null else blockProblem)
                 Field(dataText, { dataText = it.uppercase().take(47) }, "Data: 16 bytes in hex", error = if (dataText.isEmpty() || data != null) null else "Needs exactly 32 hex digits")
